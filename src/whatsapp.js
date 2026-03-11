@@ -12,6 +12,7 @@ const AUTH_MODE_AUTO = "auto";
 const AUTH_MODE_PAIRING = "pairing";
 const AUTH_MODE_QR = "qr";
 const PAIRING_REQUEST_DELAY_MS = 1000;
+const PRELOGIN_DISCONNECTS_BEFORE_QR_FALLBACK = 3;
 
 let baileysModulePromise = null;
 
@@ -134,6 +135,8 @@ function createWhatsAppBot(groupName) {
   let preferQrLogin =
     authMode === AUTH_MODE_QR ||
     (!phoneNumber && authMode !== AUTH_MODE_PAIRING);
+  let preLoginDisconnectCount = 0;
+  let lastLoggedPairingCode = null;
   let status = {
     state: "starting",
     connected: false,
@@ -249,6 +252,23 @@ function createWhatsAppBot(groupName) {
     }, RECONNECT_DELAY_MS);
   }
 
+  function logPairingCode(code) {
+    if (!code || lastLoggedPairingCode === code) {
+      return;
+    }
+
+    lastLoggedPairingCode = code;
+
+    console.log("");
+    console.log("================================");
+    console.log("WHATSAPP PAIRING CODE:");
+    console.log(code);
+    console.log("================================");
+    console.log("Enter this code in WhatsApp:");
+    console.log("WhatsApp -> Linked Devices -> Link with phone number");
+    console.log("");
+  }
+
   function shouldUseQr() {
     if (authMode === AUTH_MODE_QR) {
       return true;
@@ -292,6 +312,8 @@ function createWhatsAppBot(groupName) {
     if (!code) {
       return;
     }
+
+    logPairingCode(code);
 
     updateStatus({
       state: "pairing_code",
@@ -364,15 +386,6 @@ function createWhatsAppBot(groupName) {
 
           codeIssued = true;
           setPairingCodeStatus(code);
-
-          console.log("");
-          console.log("================================");
-          console.log("WHATSAPP PAIRING CODE:");
-          console.log(code);
-          console.log("================================");
-          console.log("Enter this code in WhatsApp:");
-          console.log("WhatsApp -> Linked Devices -> Link with phone number");
-          console.log("");
         } catch (error) {
           if (sock !== activeSocket) {
             return;
@@ -439,7 +452,7 @@ function createWhatsAppBot(groupName) {
 
     const activeSocket = makeWASocket({
       auth: state,
-      browser: Browsers.macOS("Chrome"),
+      browser: Browsers.ubuntu("Chrome"),
       defaultQueryTimeoutMs: undefined,
       logger: createSilentLogger(),
       markOnlineOnConnect: false,
@@ -504,6 +517,7 @@ function createWhatsAppBot(groupName) {
       if (connection === "open") {
         isReady = true;
         clearReconnectTimer();
+        preLoginDisconnectCount = 0;
         resetPairingState(activeSocket);
         updateStatus({
           state: "connected",
@@ -538,6 +552,11 @@ function createWhatsAppBot(groupName) {
         activeSocket.authState.creds.pairingCode
           ? activeSocket.authState.creds.pairingCode
           : null;
+      const isPreLoginDisconnect = !activeSocket.authState.creds.registered;
+
+      if (isPreLoginDisconnect) {
+        preLoginDisconnectCount += 1;
+      }
 
       if (statusCode === DisconnectReason.restartRequired) {
         console.log("[WhatsApp] Restart required; reconnecting...");
@@ -557,6 +576,19 @@ function createWhatsAppBot(groupName) {
         return;
       }
 
+      if (
+        isPreLoginDisconnect &&
+        !pendingPairingCode &&
+        !preferQrLogin &&
+        authMode !== AUTH_MODE_PAIRING &&
+        preLoginDisconnectCount >= PRELOGIN_DISCONNECTS_BEFORE_QR_FALLBACK
+      ) {
+        preferQrLogin = true;
+        console.warn(
+          "[WhatsApp] Pairing code flow is unstable on this host; switching to QR fallback."
+        );
+      }
+
       if (statusCode === DisconnectReason.loggedOut) {
         if (!activeSocket.authState.creds.registered) {
           console.warn(
@@ -569,7 +601,9 @@ function createWhatsAppBot(groupName) {
             qr: null,
             message: pendingPairingCode
               ? "Pairing code generated. Enter it in WhatsApp to finish linking."
-              : "WhatsApp login session disconnected before pairing. Reconnecting...",
+              : preferQrLogin
+                ? "Pairing code flow failed repeatedly. Reconnecting with QR fallback..."
+                : "WhatsApp login session disconnected before pairing. Reconnecting...",
             lastError: errorMessage
           });
           scheduleReconnect();
