@@ -283,6 +283,18 @@ function createWhatsAppBot(groupName) {
     });
   }
 
+  function setPairingCodeStatus(code) {
+    updateStatus({
+      state: "pairing_code",
+      connected: false,
+      pairingCode: code,
+      qr: null,
+      message:
+        "Enter this code in WhatsApp > Linked Devices > Link with phone number.",
+      lastError: null
+    });
+  }
+
   async function requestPairingCode(activeSocket) {
     if (!activeSocket || shouldUseQr()) {
       return;
@@ -306,6 +318,16 @@ function createWhatsAppBot(groupName) {
       return;
     }
 
+    if (activeSocket.authState.creds.pairingCode) {
+      pairingState = {
+        socket: activeSocket,
+        requested: true,
+        promise: null
+      };
+      setPairingCodeStatus(activeSocket.authState.creds.pairingCode);
+      return;
+    }
+
     if (pairingState.socket === activeSocket && pairingState.requested) {
       return pairingState.promise;
     }
@@ -326,15 +348,7 @@ function createWhatsAppBot(groupName) {
           }
 
           codeIssued = true;
-          updateStatus({
-            state: "pairing_code",
-            connected: false,
-            pairingCode: code,
-            qr: null,
-            message:
-              "Enter this code in WhatsApp > Linked Devices > Link with phone number.",
-            lastError: null
-          });
+          setPairingCodeStatus(code);
 
           console.log("");
           console.log("================================");
@@ -394,6 +408,11 @@ function createWhatsAppBot(groupName) {
     });
 
     const { state, saveCreds } = await useMultiFileAuthState(SESSION_ROOT);
+
+    if (!state.creds.registered && state.creds.pairingCode) {
+      setPairingCodeStatus(state.creds.pairingCode);
+    }
+
     const waVersion = await resolveWaWebVersion(fetchLatestWaWebVersion);
 
     const activeSocket = makeWASocket({
@@ -489,6 +508,11 @@ function createWhatsAppBot(groupName) {
 
       const statusCode = lastDisconnect?.error?.output?.statusCode;
       const errorMessage = lastDisconnect?.error?.message || null;
+      const pendingPairingCode =
+        !activeSocket.authState.creds.registered &&
+        activeSocket.authState.creds.pairingCode
+          ? activeSocket.authState.creds.pairingCode
+          : null;
 
       if (statusCode === DisconnectReason.restartRequired) {
         console.log("[WhatsApp] Restart required; reconnecting...");
@@ -509,6 +533,24 @@ function createWhatsAppBot(groupName) {
       }
 
       if (statusCode === DisconnectReason.loggedOut) {
+        if (!activeSocket.authState.creds.registered) {
+          console.warn(
+            "[WhatsApp] Pre-login session disconnected; reconnecting without resetting the pending pairing state."
+          );
+          updateStatus({
+            state: pendingPairingCode ? "pairing_code" : "reconnecting",
+            connected: false,
+            pairingCode: pendingPairingCode,
+            qr: null,
+            message: pendingPairingCode
+              ? "Pairing code generated. Enter it in WhatsApp to finish linking."
+              : "WhatsApp login session disconnected before pairing. Reconnecting...",
+            lastError: errorMessage
+          });
+          scheduleReconnect();
+          return;
+        }
+
         console.warn("[WhatsApp] Session logged out; resetting session and reconnecting.");
         preferQrLogin =
           authMode === AUTH_MODE_QR ||
