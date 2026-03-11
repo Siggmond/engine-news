@@ -1,276 +1,70 @@
-const { Client, MessageMedia } = require("whatsapp-web.js");
-const BaseAuthStrategy = require("whatsapp-web.js/src/authStrategies/BaseAuthStrategy");
 const { EventEmitter } = require("events");
 const fs = require("fs");
-const axios = require("axios");
-const mime = require("mime-types");
 const path = require("path");
+const axios = require("axios");
 
-const CLIENT_ID = "lebanon-news-engine";
 const SESSION_ROOT =
   process.env.WHATSAPP_SESSION_DIR ||
   path.join(process.cwd(), "data", "whatsapp-session");
-const CHROMIUM_LOCK_FILES = new Set([
-  "SingletonCookie",
-  "SingletonLock",
-  "SingletonSocket",
-  "lockfile"
-]);
-const PERSISTED_PROFILE_PATHS = [
-  path.join("Default", "IndexedDB"),
-  path.join("Default", "Local Storage"),
-  path.join("Default", "Session Storage"),
-  path.join("Default", "Network")
-];
-const EXCLUDED_PROFILE_DIRS = new Set([
-  "Code Cache",
-  "Cache",
-  "GPUCache",
-  "Service Worker",
-  "GrShaderCache",
-  "ShaderCache"
-]);
-let qrPrinted = false;
+const RECONNECT_DELAY_MS = 5000;
 
-function isChromiumLockFile(fileName) {
-  return (
-    CHROMIUM_LOCK_FILES.has(fileName) ||
-    fileName.startsWith(".org.chromium.Chromium.")
-  );
+let baileysModulePromise = null;
+
+function loadBaileys() {
+  if (!baileysModulePromise) {
+    baileysModulePromise = import("@whiskeysockets/baileys");
+  }
+
+  return baileysModulePromise;
 }
 
-async function removeChromiumLockFiles(rootDir) {
-  if (!fs.existsSync(rootDir)) {
-    return 0;
-  }
-
-  let removed = 0;
-  const entries = await fs.promises.readdir(rootDir, { withFileTypes: true });
-
-  for (const entry of entries) {
-    const entryPath = path.join(rootDir, entry.name);
-
-    if (isChromiumLockFile(entry.name)) {
-      await fs.promises.rm(entryPath, { recursive: true, force: true });
-      removed += 1;
-      continue;
+function createSilentLogger() {
+  const logger = {
+    level: "silent",
+    trace() {},
+    debug() {},
+    info() {},
+    warn() {},
+    error() {},
+    fatal() {},
+    child() {
+      return logger;
     }
+  };
 
-    if (entry.isDirectory()) {
-      removed += await removeChromiumLockFiles(entryPath);
-    }
-  }
-
-  return removed;
+  return logger;
 }
 
-function shouldExcludePersistedPath(relativePath) {
-  if (!relativePath || relativePath === ".") {
-    return false;
-  }
-
-  return relativePath
-    .split(path.sep)
-    .some(
-      (segment) =>
-        EXCLUDED_PROFILE_DIRS.has(segment) || isChromiumLockFile(segment)
-    );
+function sanitizePhoneNumber(value) {
+  return String(value || "").replace(/\D/g, "");
 }
 
-async function copyPersistedSessionData(sourceDir, targetDir) {
-  if (!fs.existsSync(sourceDir)) {
-    return;
-  }
-
-  for (const relativePath of PERSISTED_PROFILE_PATHS) {
-    const sourcePath = path.join(sourceDir, relativePath);
-
-    if (!fs.existsSync(sourcePath)) {
-      continue;
-    }
-
-    const targetPath = path.join(targetDir, relativePath);
-
-    await fs.promises.mkdir(path.dirname(targetPath), { recursive: true });
-    await fs.promises.cp(sourcePath, targetPath, {
-      recursive: true,
-      force: true,
-      filter: (currentSourcePath) => {
-        const nestedRelativePath = path.relative(sourceDir, currentSourcePath);
-        return !shouldExcludePersistedPath(nestedRelativePath);
-      }
-    });
-  }
-}
-
-class RailwaySessionAuth extends BaseAuthStrategy {
-  constructor(options = {}) {
-    super();
-
-    const clientId = options.clientId || CLIENT_ID;
-
-    this.clientId = clientId;
-    this.dataPath = path.resolve(options.dataPath || SESSION_ROOT);
-    this.sessionDir = path.join(this.dataPath, `session-${clientId}`);
-    this.syncIntervalMs = Number(options.syncIntervalMs) || 60000;
-    this.runtimeUserDataDir = null;
-    this.syncTimer = null;
-    this.syncPromise = null;
-  }
-
-  async beforeBrowserInitialized() {
-    // LocalAuth hard-wires Chromium to a persistent profile, which is what
-    // causes Railway restarts to trip over stale lock files.
-    const userDataDir = "/tmp/chrome-" + Date.now();
-    const puppeteerConfig = this.client.options.puppeteer || {};
-
-    await fs.promises.mkdir(this.dataPath, { recursive: true });
-
-    const removedLocks = await removeChromiumLockFiles(this.dataPath);
-    if (removedLocks > 0) {
-      console.log(
-        `[WhatsApp] Removed ${removedLocks} stale Chromium lock file(s) from ${this.dataPath}`
-      );
-    }
-
-    await fs.promises.rm(userDataDir, { recursive: true, force: true });
-    await fs.promises.mkdir(userDataDir, { recursive: true });
-    await copyPersistedSessionData(this.sessionDir, userDataDir);
-
-    this.runtimeUserDataDir = userDataDir;
-
-    console.log(`[WhatsApp] Session storage: ${this.sessionDir}`);
-    console.log(`[WhatsApp] Runtime Chromium profile: ${userDataDir}`);
-
-    this.client.options.puppeteer = {
-      ...puppeteerConfig,
-      userDataDir
-    };
-  }
-
-  async afterAuthReady() {
-    this.startSyncLoop();
-    await this.persistSession();
-  }
-
-  async destroy() {
-    await this.shutdown();
-  }
-
-  async disconnect() {
-    await this.shutdown();
-  }
-
-  async logout() {
-    await this.shutdown();
-    await fs.promises.rm(this.sessionDir, {
-      recursive: true,
-      force: true
-    });
-  }
-
-  startSyncLoop() {
-    if (this.syncTimer) {
-      return;
-    }
-
-    this.syncTimer = setInterval(() => {
-      this.persistSession().catch((error) => {
-        console.error(`[WhatsApp] Session sync failed: ${error.message}`);
-      });
-    }, this.syncIntervalMs);
-
-    if (typeof this.syncTimer.unref === "function") {
-      this.syncTimer.unref();
-    }
-  }
-
-  async persistSession() {
-    if (this.syncPromise) {
-      return this.syncPromise;
-    }
-
-    this.syncPromise = this.doPersistSession().finally(() => {
-      this.syncPromise = null;
-    });
-
-    return this.syncPromise;
-  }
-
-  async doPersistSession() {
-    if (!this.runtimeUserDataDir || !fs.existsSync(this.runtimeUserDataDir)) {
-      return;
-    }
-
-    const stagingDir = path.join(
-      path.dirname(this.runtimeUserDataDir),
-      `whatsapp-session-${this.clientId}-staging`
-    );
-
-    try {
-      await fs.promises.rm(stagingDir, { recursive: true, force: true });
-      await copyPersistedSessionData(this.runtimeUserDataDir, stagingDir);
-      await removeChromiumLockFiles(stagingDir);
-
-      fs.rmSync(this.dataPath, { recursive: true, force: true });
-      await fs.promises.mkdir(this.dataPath, { recursive: true });
-
-      if (fs.existsSync(stagingDir)) {
-        await copyPersistedSessionData(stagingDir, this.sessionDir);
-      }
-    } finally {
-      await fs.promises.rm(stagingDir, { recursive: true, force: true });
-    }
-  }
-
-  async shutdown() {
-    if (this.syncTimer) {
-      clearInterval(this.syncTimer);
-      this.syncTimer = null;
-    }
-
-    try {
-      await this.persistSession();
-    } catch (error) {
-      console.error(
-        `[WhatsApp] Session sync failed during shutdown: ${error.message}`
-      );
-    }
-
-    if (!this.runtimeUserDataDir) {
-      return;
-    }
-
-    await removeChromiumLockFiles(this.runtimeUserDataDir);
-    await fs.promises.rm(this.runtimeUserDataDir, {
-      recursive: true,
-      force: true
-    });
-
-    this.runtimeUserDataDir = null;
-  }
+async function resetSessionDir() {
+  await fs.promises.rm(SESSION_ROOT, { recursive: true, force: true });
+  await fs.promises.mkdir(SESSION_ROOT, { recursive: true });
 }
 
 function createWhatsAppBot(groupName) {
-  let client = null;
+  let sock = null;
   let isReady = false;
   let groupId = null;
   let reconnectTimer = null;
-  let waitingForQrScan = false;
+  let pairingRequested = false;
   let startPromise = null;
   let resolveStart = null;
+  let rejectStart = null;
 
   const events = new EventEmitter();
 
-  async function resolveGroup() {
-    if (!client || !isReady) return null;
+  async function resolveGroup(activeSocket = sock) {
+    if (!activeSocket || !isReady) return null;
 
     try {
-      const chats = await client.getChats();
+      const groups = await activeSocket.groupFetchAllParticipating();
 
-      const targetGroup = chats.find(
-        (chat) => chat.isGroup && chat.name === groupName
-      );
+      const targetGroup = Object.entries(groups || {}).find(([, metadata]) => {
+        return metadata?.subject === groupName || metadata?.name === groupName;
+      });
 
       if (!targetGroup) {
         console.error(`[WhatsApp] Group not found: ${groupName}`);
@@ -278,14 +72,12 @@ function createWhatsAppBot(groupName) {
         return null;
       }
 
-      groupId = targetGroup.id._serialized;
+      groupId = targetGroup[0];
 
       return groupId;
     } catch (error) {
       console.error(`[WhatsApp] Failed to resolve group: ${error.message}`);
-
       groupId = null;
-
       return null;
     }
   }
@@ -299,151 +91,189 @@ function createWhatsAppBot(groupName) {
     reconnectTimer = null;
   }
 
-  function scheduleReconnect() {
-    if (waitingForQrScan || reconnectTimer) {
+  function failStart(error) {
+    if (!rejectStart) {
       return;
     }
 
-    reconnectTimer = setTimeout(async () => {
-      reconnectTimer = null;
-      qrPrinted = false;
-
-      console.log("[WhatsApp] Reconnecting...");
-
-      try {
-        if (client) {
-          await client.destroy();
-        }
-      } catch {}
-
-      initialize();
-    }, 5000);
+    rejectStart(error);
+    rejectStart = null;
+    resolveStart = null;
   }
 
-  function initialize() {
-    const executablePath =
-      process.env.PUPPETEER_EXECUTABLE_PATH || process.env.CHROME_PATH;
-
-    const puppeteerConfig = {
-      headless: true,
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-gpu",
-        "--single-process",
-        "--no-zygote",
-        "--disable-extensions"
-      ]
-    };
-
-    if (executablePath) {
-      puppeteerConfig.executablePath = executablePath;
+  function resolveStartIfNeeded() {
+    if (!resolveStart) {
+      return;
     }
 
-    client = new Client({
-      authStrategy: new RailwaySessionAuth({
-        clientId: CLIENT_ID,
-        dataPath: SESSION_ROOT
-      }),
-      puppeteer: puppeteerConfig
-    });
+    resolveStart();
+    resolveStart = null;
+    rejectStart = null;
+  }
 
-    client.on("qr", (qr) => {
-      waitingForQrScan = true;
-      clearReconnectTimer();
+  function scheduleReconnect() {
+    if (reconnectTimer) {
+      return;
+    }
 
-      if (qr && !qrPrinted) {
-        qrPrinted = true;
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
 
-        const qrUrl =
-          "https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=" +
-          qr;
+      initialize().catch((error) => {
+        console.error(`[WhatsApp] Initialization failed: ${error.message}`);
+        scheduleReconnect();
+      });
+    }, RECONNECT_DELAY_MS);
+  }
 
-        console.log("\n==============================");
-        console.log("WhatsApp login required");
-        console.log("Open this link and scan:");
-        console.log(qrUrl);
-        console.log("==============================\n");
-      }
-    });
+  async function printPairingCode(activeSocket) {
+    if (!activeSocket || activeSocket.authState.creds.registered) {
+      return;
+    }
 
-    client.on("ready", async () => {
-      isReady = true;
-      waitingForQrScan = false;
-      qrPrinted = false;
-      clearReconnectTimer();
+    const phoneNumber = sanitizePhoneNumber(process.env.WHATSAPP_NUMBER);
 
-      console.log("[WhatsApp] Connected");
+    if (!phoneNumber) {
+      const error = new Error(
+        "WHATSAPP_NUMBER must be set, for example: 961XXXXXXXX"
+      );
 
-      await resolveGroup();
+      console.error(`[WhatsApp] ${error.message}`);
+      failStart(error);
+      return;
+    }
 
-      events.emit("ready");
+    pairingRequested = true;
 
-      if (resolveStart) {
-        resolveStart();
-        resolveStart = null;
-      }
-    });
+    try {
+      const code = await activeSocket.requestPairingCode(phoneNumber);
 
-    client.on("auth_failure", (message) => {
-      isReady = false;
-      groupId = null;
-      waitingForQrScan = false;
-      qrPrinted = false;
-
-      console.error(`[WhatsApp] Auth failure: ${message}`);
-    });
-
-    client.on("disconnected", (reason) => {
-      isReady = false;
-      groupId = null;
-
-      console.warn(`[WhatsApp] Disconnected: ${reason}`);
-
-      if (waitingForQrScan || reason === "LOGOUT") {
-        return;
-      }
-
-      qrPrinted = false;
+      console.log("");
+      console.log("================================");
+      console.log("WHATSAPP PAIRING CODE:");
+      console.log(code);
+      console.log("================================");
+      console.log("Enter this code in WhatsApp:");
+      console.log("WhatsApp -> Linked Devices -> Link with phone number");
+      console.log("");
+    } catch (error) {
+      pairingRequested = false;
+      console.error(`[WhatsApp] Failed to request pairing code: ${error.message}`);
       scheduleReconnect();
+    }
+  }
+
+  async function initialize() {
+    const {
+      default: makeWASocket,
+      Browsers,
+      DisconnectReason,
+      useMultiFileAuthState
+    } = await loadBaileys();
+
+    await fs.promises.mkdir(SESSION_ROOT, { recursive: true });
+
+    const { state, saveCreds } = await useMultiFileAuthState(SESSION_ROOT);
+
+    const activeSocket = makeWASocket({
+      auth: state,
+      browser: Browsers.macOS("Chrome"),
+      defaultQueryTimeoutMs: undefined,
+      logger: createSilentLogger(),
+      markOnlineOnConnect: false,
+      printQRInTerminal: false,
+      syncFullHistory: false
     });
 
-    client.initialize().catch((error) => {
-      isReady = false;
-      groupId = null;
+    sock = activeSocket;
 
-      console.error(`[WhatsApp] Initialization failed: ${error.message}`);
+    activeSocket.ev.on("creds.update", saveCreds);
 
-      if (waitingForQrScan) {
+    activeSocket.ev.on("connection.update", async (update) => {
+      if (sock !== activeSocket) {
         return;
       }
 
-      qrPrinted = false;
+      const { connection, lastDisconnect } = update;
+
+      if (
+        !activeSocket.authState.creds.registered &&
+        !pairingRequested &&
+        connection === "connecting"
+      ) {
+        await printPairingCode(activeSocket);
+      }
+
+      if (connection === "open") {
+        isReady = true;
+        pairingRequested = false;
+        clearReconnectTimer();
+
+        console.log("[WhatsApp] Connected");
+
+        await resolveGroup(activeSocket);
+
+        events.emit("ready");
+        resolveStartIfNeeded();
+        return;
+      }
+
+      if (connection !== "close") {
+        return;
+      }
+
+      isReady = false;
+      groupId = null;
+      pairingRequested = false;
+
+      const statusCode = lastDisconnect?.error?.output?.statusCode;
+
+      if (statusCode === DisconnectReason.restartRequired) {
+        console.log("[WhatsApp] Restart required; reconnecting...");
+        clearReconnectTimer();
+        initialize().catch((error) => {
+          console.error(`[WhatsApp] Initialization failed: ${error.message}`);
+          scheduleReconnect();
+        });
+        return;
+      }
+
+      if (statusCode === DisconnectReason.loggedOut) {
+        console.warn("[WhatsApp] Session logged out; requesting a fresh pairing code.");
+
+        try {
+          await resetSessionDir();
+        } catch (error) {
+          console.error(`[WhatsApp] Failed to reset session: ${error.message}`);
+        }
+
+        scheduleReconnect();
+        return;
+      }
+
+      console.warn(`[WhatsApp] Disconnected: ${statusCode || "unknown"}`);
       scheduleReconnect();
     });
   }
 
   async function sendToGroup(message) {
-    if (!client || !isReady) return false;
+    if (!sock || !isReady) return false;
 
     if (!groupId) await resolveGroup();
 
     if (!groupId) return false;
 
     try {
-      await client.sendMessage(groupId, message);
-
+      await sock.sendMessage(groupId, { text: message });
       return true;
     } catch (error) {
       console.error(`[WhatsApp] Failed to send message: ${error.message}`);
-
       return false;
     }
   }
 
   async function sendMediaToGroup(url, caption) {
-    if (!client || !isReady) return false;
+    if (!sock || !isReady) return false;
 
     if (!groupId) await resolveGroup();
 
@@ -455,19 +285,14 @@ function createWhatsAppBot(groupName) {
         timeout: 20000
       });
 
-      const mimeType = mime.lookup(url) || "image/jpeg";
-
-      const media = new MessageMedia(
-        mimeType,
-        Buffer.from(response.data).toString("base64")
-      );
-
-      await client.sendMessage(groupId, media, { caption });
+      await sock.sendMessage(groupId, {
+        image: Buffer.from(response.data),
+        caption
+      });
 
       return true;
     } catch (error) {
       console.error(`[WhatsApp] Media send failed: ${error.message}`);
-
       return false;
     }
   }
@@ -477,11 +302,15 @@ function createWhatsAppBot(groupName) {
       return startPromise;
     }
 
-    startPromise = new Promise((resolve) => {
+    startPromise = new Promise((resolve, reject) => {
       resolveStart = resolve;
+      rejectStart = reject;
     });
 
-    initialize();
+    initialize().catch((error) => {
+      console.error(`[WhatsApp] Initialization failed: ${error.message}`);
+      scheduleReconnect();
+    });
 
     return startPromise;
   }

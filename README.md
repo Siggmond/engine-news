@@ -3,7 +3,7 @@
 Automated Node.js engine that:
 
 - Manages RSS feeds from a web dashboard
-- Scans feeds every 10 minutes
+- Scans feeds every minute
 - Filters Lebanon-war related news
 - Translates non-Arabic content to Arabic
 - Sends formatted alerts to a WhatsApp group
@@ -13,7 +13,7 @@ Automated Node.js engine that:
 
 - Node.js
 - Express.js
-- whatsapp-web.js
+- Baileys
 - rss-parser
 - node-cron
 - dotenv
@@ -49,11 +49,13 @@ Create or edit `.env`:
 
 ```env
 PORT=3000
-GROUP_NAME=نور الولاية
-LIBRETRANSLATE_URL=https://libretranslate.de/translate
+GROUP_NAME=Your WhatsApp Group
+WHATSAPP_NUMBER=961XXXXXXXX
+GROQ_API_KEY=your_groq_api_key
 WHATSAPP_SESSION_DIR=/app/data/whatsapp-session
-# PUPPETEER_EXECUTABLE_PATH=C:\Program Files\Google\Chrome\Application\chrome.exe
 ```
+
+`WHATSAPP_NUMBER` must be the WhatsApp account number in international format without `+` or spaces.
 
 ## Run Locally
 
@@ -62,61 +64,51 @@ npm install
 node src/server.js
 ```
 
-Then open:
-
-`http://localhost:3000`
+Then open `http://localhost:3000`.
 
 ## WhatsApp Setup
 
 1. Start the server.
-2. A QR code will print in the terminal.
-3. Scan it from WhatsApp (`Linked Devices`).
-4. Keep the account in a group named exactly as `GROUP_NAME`.
+2. A pairing code will print in the terminal logs.
+3. In WhatsApp, open `Linked Devices`.
+4. Choose `Link with phone number`.
+5. Enter the printed pairing code.
+6. Keep the account in a group named exactly as `GROUP_NAME`.
 
-Session data is stored under `WHATSAPP_SESSION_DIR`, so future restarts do not need QR unless the session expires.
+Session data is stored under `WHATSAPP_SESSION_DIR`, so future restarts do not need a new pairing code unless the session expires.
 
 ## Railway Deployment
 
 - Mount the Railway volume at `/app/data`.
-- The WhatsApp session profile is persisted at `/app/data/whatsapp-session`.
-- Chromium launches from a unique `/tmp/chrome-*` profile on every boot and syncs the active session back to the mounted volume.
-- On first login, the app prints a QR login link in the Railway logs.
+- Set `WHATSAPP_NUMBER` in Railway to the WhatsApp account number, for example `961XXXXXXXX`.
+- The WhatsApp session files are persisted at `/app/data/whatsapp-session`.
+- On first login, the app prints a pairing code in the Railway logs instead of a QR link.
 
 ## Dashboard Features
 
 - Add RSS feed URL
 - View active feeds
 - Delete feeds
-- Basic validation (empty/invalid/duplicate URLs blocked)
+- Basic validation for empty, invalid, and duplicate URLs
 
 ## Engine Flow
 
-1. Read feeds from `data/feeds.json`
-2. Parse feed items via `rss-parser`
-3. Filter by Lebanon keywords
-4. Skip if link exists in `data/posted.json`
-5. Translate non-Arabic title/summary to Arabic
-6. Send to WhatsApp group in this format:
-
-```text
-🚨 عاجل - لبنان
-━━━━━━━━━━━━
-
-{العنوان}
-
-{الملخص}
-
-🔗 المصدر: {site}
-```
+1. Read feeds from `data/feeds.json`.
+2. Parse feed items via `rss-parser`.
+3. Filter by Lebanon keywords.
+4. Skip if the link already exists in `data/posted.json`.
+5. Translate non-Arabic title and summary to Arabic.
+6. Send the formatted result to the configured WhatsApp group.
 
 ## Replit Instructions
 
 1. Create a new Replit Node.js project.
-2. Upload this project or clone your repo into Replit.
-3. Add `.env` values in Replit Secrets:
+2. Upload this project or clone the repo into Replit.
+3. Add these secrets:
    - `PORT=3000`
-   - `GROUP_NAME=نور الولاية`
-   - `LIBRETRANSLATE_URL=https://libretranslate.de/translate`
+   - `GROUP_NAME=Your WhatsApp Group`
+   - `WHATSAPP_NUMBER=961XXXXXXXX`
+   - `GROQ_API_KEY=your_groq_api_key`
 4. Run:
 
 ```bash
@@ -129,10 +121,4 @@ node src/server.js
 Notes for Replit:
 
 - Keep the repl running so cron jobs continue.
-- WhatsApp Web login requires scanning QR from terminal output.
-- If Chromium startup fails in your Replit environment, use a Replit template that supports headless browser automation.
-- If you see "Could not find Chrome", install it with:
-
-```bash
-npx puppeteer browsers install chrome
-```
+- The first login requires entering the pairing code shown in the terminal.
