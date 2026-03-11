@@ -6,10 +6,13 @@ const axios = require("axios");
 const SESSION_ROOT =
   process.env.WHATSAPP_SESSION_DIR ||
   path.join(process.cwd(), "data", "whatsapp-session");
+const PAIRING_CODE_DELAY_MS = 1500;
 const RECONNECT_DELAY_MS = 5000;
+const STREAM_METHOD_NOT_ALLOWED_STATUS = 405;
 
 let baileysModulePromise = null;
 let pairingRequested = false;
+let pairingRequestPromise = null;
 
 function loadBaileys() {
   if (!baileysModulePromise) {
@@ -38,6 +41,10 @@ function createSilentLogger() {
 
 function sanitizePhoneNumber(value) {
   return String(value || "").replace(/\D/g, "");
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function resetSessionDir() {
@@ -143,8 +150,27 @@ function createWhatsAppBot(groupName) {
       return;
     }
 
-    try {
-      if (!pairingRequested && !activeSocket.authState.creds.registered) {
+    if (pairingRequested) {
+      return;
+    }
+
+    if (pairingRequestPromise) {
+      return pairingRequestPromise;
+    }
+
+    pairingRequestPromise = (async () => {
+      try {
+        await activeSocket.waitForSocketOpen();
+        await wait(PAIRING_CODE_DELAY_MS);
+
+        if (
+          sock !== activeSocket ||
+          pairingRequested ||
+          activeSocket.authState.creds.registered
+        ) {
+          return;
+        }
+
         pairingRequested = true;
         const code = await activeSocket.requestPairingCode(phoneNumber);
 
@@ -156,11 +182,22 @@ function createWhatsAppBot(groupName) {
         console.log("Enter this code in WhatsApp:");
         console.log("WhatsApp -> Linked Devices -> Link with phone number");
         console.log("");
+      } catch (error) {
+        if (!pairingRequested) {
+          console.warn(
+            `[WhatsApp] Pairing request aborted before socket was ready: ${error.message}`
+          );
+        } else {
+          console.error(`[WhatsApp] Failed to request pairing code: ${error.message}`);
+        }
+
+        scheduleReconnect();
+      } finally {
+        pairingRequestPromise = null;
       }
-    } catch (error) {
-      console.error(`[WhatsApp] Failed to request pairing code: ${error.message}`);
-      scheduleReconnect();
-    }
+    })();
+
+    return pairingRequestPromise;
   }
 
   async function initialize() {
@@ -238,6 +275,22 @@ function createWhatsAppBot(groupName) {
 
       if (statusCode === DisconnectReason.loggedOut) {
         console.warn("[WhatsApp] Session logged out; resetting session and reconnecting.");
+
+        try {
+          await resetSessionDir();
+        } catch (error) {
+          console.error(`[WhatsApp] Failed to reset session: ${error.message}`);
+        }
+
+        scheduleReconnect();
+        return;
+      }
+
+      if (
+        statusCode === STREAM_METHOD_NOT_ALLOWED_STATUS &&
+        !activeSocket.authState.creds.registered
+      ) {
+        console.warn("[WhatsApp] Pairing session rejected; resetting session and reconnecting.");
 
         try {
           await resetSessionDir();
