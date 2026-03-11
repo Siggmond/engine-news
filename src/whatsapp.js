@@ -14,29 +14,38 @@ function createWhatsAppBot(groupName) {
 
   const events = new EventEmitter();
 
-  /* Remove chromium lock files after crashes or restarts */
+  /* Remove chromium lock files left after crashes */
   function cleanChromiumLocks() {
 
-    const sessionPath = path.join(process.cwd(), "data");
+    const profilePath = path.join(
+      process.cwd(),
+      "data",
+      "LocalAuth",
+      "lebanon-news-engine"
+    );
 
-    const lockFiles = [
-      "SingletonLock",
-      "SingletonCookie",
-      "SingletonSocket"
-    ];
+    if (!fs.existsSync(profilePath)) return;
 
-    lockFiles.forEach(file => {
+    try {
 
-      const fullPath = path.join(sessionPath, file);
+      const files = fs.readdirSync(profilePath);
 
-      if (fs.existsSync(fullPath)) {
-        try {
-          fs.unlinkSync(fullPath);
-          console.log(`[WhatsApp] Removed lock file: ${file}`);
-        } catch {}
-      }
+      files.forEach(file => {
 
-    });
+        if (
+          file.includes("Singleton") ||
+          file.includes("LOCK") ||
+          file.includes("lock")
+        ) {
+          try {
+            fs.rmSync(path.join(profilePath, file), { force: true });
+            console.log("[WhatsApp] Removed chromium lock:", file);
+          } catch {}
+        }
+
+      });
+
+    } catch {}
   }
 
   async function resolveGroup() {
@@ -90,7 +99,7 @@ function createWhatsAppBot(groupName) {
 
   function initialize() {
 
-    /* Fix chromium profile lock issue */
+    /* fix chromium profile lock */
     cleanChromiumLocks();
 
     const executablePath =
@@ -133,7 +142,7 @@ function createWhatsAppBot(groupName) {
 
       console.log("Open this link and scan with WhatsApp:\n");
       console.log(qrUrl);
-      console.log("\n");
+      console.log("");
 
     });
 
