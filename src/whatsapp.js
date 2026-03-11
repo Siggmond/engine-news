@@ -6,13 +6,13 @@ const axios = require("axios");
 const SESSION_ROOT =
   process.env.WHATSAPP_SESSION_DIR ||
   path.join(process.cwd(), "data", "whatsapp-session");
-const PAIRING_CODE_DELAY_MS = 1500;
 const RECONNECT_DELAY_MS = 5000;
 const STREAM_METHOD_NOT_ALLOWED_STATUS = 405;
+const AUTH_MODE_AUTO = "auto";
+const AUTH_MODE_PAIRING = "pairing";
+const AUTH_MODE_QR = "qr";
 
 let baileysModulePromise = null;
-let pairingRequested = false;
-let pairingRequestPromise = null;
 
 function loadBaileys() {
   if (!baileysModulePromise) {
@@ -43,8 +43,20 @@ function sanitizePhoneNumber(value) {
   return String(value || "").replace(/\D/g, "");
 }
 
-function wait(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function getConfiguredAuthMode() {
+  const rawValue = String(process.env.WHATSAPP_AUTH_MODE || AUTH_MODE_AUTO)
+    .trim()
+    .toLowerCase();
+
+  if (rawValue === "pairing_code" || rawValue === AUTH_MODE_PAIRING) {
+    return AUTH_MODE_PAIRING;
+  }
+
+  if (rawValue === AUTH_MODE_QR) {
+    return AUTH_MODE_QR;
+  }
+
+  return AUTH_MODE_AUTO;
 }
 
 async function resetSessionDir() {
@@ -60,8 +72,43 @@ function createWhatsAppBot(groupName) {
   let startPromise = null;
   let resolveStart = null;
   let rejectStart = null;
+  const authMode = getConfiguredAuthMode();
+  const phoneNumber = sanitizePhoneNumber(process.env.WHATSAPP_NUMBER);
+  let preferQrLogin =
+    authMode === AUTH_MODE_QR ||
+    (!phoneNumber && authMode !== AUTH_MODE_PAIRING);
+  let status = {
+    state: "starting",
+    connected: false,
+    authMode,
+    phoneNumberConfigured: Boolean(phoneNumber),
+    pairingCode: null,
+    qr: null,
+    message: "Starting WhatsApp connection...",
+    lastError: null,
+    updatedAt: new Date().toISOString()
+  };
+  let pairingState = {
+    socket: null,
+    requested: false,
+    promise: null
+  };
 
   const events = new EventEmitter();
+
+  function getStatus() {
+    return { ...status };
+  }
+
+  function updateStatus(patch) {
+    status = {
+      ...status,
+      ...patch,
+      updatedAt: new Date().toISOString()
+    };
+
+    events.emit("status", getStatus());
+  }
 
   async function resolveGroup(activeSocket = sock) {
     if (!activeSocket || !isReady) return null;
@@ -96,6 +143,18 @@ function createWhatsAppBot(groupName) {
 
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
+  }
+
+  function resetPairingState(activeSocket = null) {
+    if (activeSocket && pairingState.socket !== activeSocket) {
+      return;
+    }
+
+    pairingState = {
+      socket: null,
+      requested: false,
+      promise: null
+    };
   }
 
   function failStart(error) {
@@ -133,71 +192,133 @@ function createWhatsAppBot(groupName) {
     }, RECONNECT_DELAY_MS);
   }
 
-  async function printPairingCode(activeSocket) {
-    if (!activeSocket) {
+  function shouldUseQr() {
+    if (authMode === AUTH_MODE_QR) {
+      return true;
+    }
+
+    if (!phoneNumber && authMode !== AUTH_MODE_PAIRING) {
+      return true;
+    }
+
+    return preferQrLogin;
+  }
+
+  function shouldRequestPairingCode() {
+    return authMode !== AUTH_MODE_QR && Boolean(phoneNumber) && !preferQrLogin;
+  }
+
+  function setWaitingStatus() {
+    if (shouldUseQr()) {
+      updateStatus({
+        state: "waiting",
+        connected: false,
+        pairingCode: null,
+        message: phoneNumber
+          ? "Waiting for WhatsApp QR code..."
+          : "WHATSAPP_NUMBER is not set. Waiting for WhatsApp QR code..."
+      });
       return;
     }
 
-    const phoneNumber = sanitizePhoneNumber(process.env.WHATSAPP_NUMBER);
+    updateStatus({
+      state: "waiting",
+      connected: false,
+      pairingCode: null,
+      qr: null,
+      message: "Requesting WhatsApp pairing code...",
+      lastError: null
+    });
+  }
+
+  async function requestPairingCode(activeSocket) {
+    if (!activeSocket || shouldUseQr()) {
+      return;
+    }
 
     if (!phoneNumber) {
       const error = new Error(
-        "WHATSAPP_NUMBER must be set, for example: 961XXXXXXXX"
+        "WHATSAPP_NUMBER must be set when WHATSAPP_AUTH_MODE=pairing."
       );
 
       console.error(`[WhatsApp] ${error.message}`);
+      updateStatus({
+        state: "error",
+        connected: false,
+        pairingCode: null,
+        qr: null,
+        message: error.message,
+        lastError: error.message
+      });
       failStart(error);
       return;
     }
 
-    if (pairingRequested) {
-      return;
+    if (pairingState.socket === activeSocket && pairingState.requested) {
+      return pairingState.promise;
     }
 
-    if (pairingRequestPromise) {
-      return pairingRequestPromise;
-    }
+    let codeIssued = false;
 
-    pairingRequestPromise = (async () => {
-      try {
-        await activeSocket.waitForSocketOpen();
-        await wait(PAIRING_CODE_DELAY_MS);
+    pairingState = {
+      socket: activeSocket,
+      requested: true,
+      promise: (async () => {
+        try {
+          setWaitingStatus();
 
-        if (
-          sock !== activeSocket ||
-          pairingRequested ||
-          activeSocket.authState.creds.registered
-        ) {
-          return;
-        }
+          const code = await activeSocket.requestPairingCode(phoneNumber);
 
-        pairingRequested = true;
-        const code = await activeSocket.requestPairingCode(phoneNumber);
+          if (sock !== activeSocket || activeSocket.authState.creds.registered) {
+            return;
+          }
 
-        console.log("");
-        console.log("================================");
-        console.log("WHATSAPP PAIRING CODE:");
-        console.log(code);
-        console.log("================================");
-        console.log("Enter this code in WhatsApp:");
-        console.log("WhatsApp -> Linked Devices -> Link with phone number");
-        console.log("");
-      } catch (error) {
-        if (!pairingRequested) {
-          console.warn(
-            `[WhatsApp] Pairing request aborted before socket was ready: ${error.message}`
-          );
-        } else {
+          codeIssued = true;
+          updateStatus({
+            state: "pairing_code",
+            connected: false,
+            pairingCode: code,
+            qr: null,
+            message:
+              "Enter this code in WhatsApp > Linked Devices > Link with phone number.",
+            lastError: null
+          });
+
+          console.log("");
+          console.log("================================");
+          console.log("WHATSAPP PAIRING CODE:");
+          console.log(code);
+          console.log("================================");
+          console.log("Enter this code in WhatsApp:");
+          console.log("WhatsApp -> Linked Devices -> Link with phone number");
+          console.log("");
+        } catch (error) {
+          if (sock !== activeSocket) {
+            return;
+          }
+
+          preferQrLogin = true;
           console.error(`[WhatsApp] Failed to request pairing code: ${error.message}`);
+          updateStatus({
+            state: "waiting",
+            connected: false,
+            pairingCode: null,
+            message: "Pairing code failed. Waiting for QR fallback...",
+            lastError: error.message
+          });
+        } finally {
+          if (pairingState.socket === activeSocket) {
+            pairingState.promise = null;
+
+            if (!codeIssued && !activeSocket.authState.creds.registered) {
+              pairingState.requested = false;
+            }
+          }
         }
+      })()
+    };
 
-        scheduleReconnect();
-      } finally {
-        pairingRequestPromise = null;
-      }
-    })();
-
-    return pairingRequestPromise;
+    return pairingState.promise;
   }
 
   async function initialize() {
@@ -209,6 +330,15 @@ function createWhatsAppBot(groupName) {
     } = await loadBaileys();
 
     await fs.promises.mkdir(SESSION_ROOT, { recursive: true });
+    resetPairingState();
+    updateStatus({
+      state: "starting",
+      connected: false,
+      pairingCode: null,
+      qr: null,
+      message: "Starting WhatsApp connection...",
+      lastError: null
+    });
 
     const { state, saveCreds } = await useMultiFileAuthState(SESSION_ROOT);
 
@@ -224,26 +354,66 @@ function createWhatsAppBot(groupName) {
 
     sock = activeSocket;
 
-    activeSocket.ev.on("creds.update", saveCreds);
+    activeSocket.ev.on("creds.update", async () => {
+      try {
+        await saveCreds();
+      } catch (error) {
+        console.error(`[WhatsApp] Failed to save session: ${error.message}`);
+      }
+
+      if (sock !== activeSocket || !activeSocket.authState.creds.registered) {
+        return;
+      }
+
+      resetPairingState(activeSocket);
+      updateStatus({
+        state: "authorizing",
+        connected: false,
+        pairingCode: null,
+        qr: null,
+        message: "WhatsApp login accepted. Finishing connection...",
+        lastError: null
+      });
+    });
 
     activeSocket.ev.on("connection.update", async (update) => {
       if (sock !== activeSocket) {
         return;
       }
 
-      const { connection, lastDisconnect } = update;
+      const { connection, lastDisconnect, qr } = update;
 
-      if (
-        !activeSocket.authState.creds.registered &&
-        !pairingRequested &&
-        connection === "connecting"
-      ) {
-        await printPairingCode(activeSocket);
+      if (!activeSocket.authState.creds.registered) {
+        if (qr && shouldUseQr()) {
+          updateStatus({
+            state: "qr",
+            connected: false,
+            qr,
+            pairingCode: null,
+            message: "Scan this QR code in WhatsApp > Linked Devices > Link a device.",
+            lastError: null
+          });
+        } else if (connection === "connecting" && !status.qr) {
+          setWaitingStatus();
+        }
+
+        if (shouldRequestPairingCode() && (connection === "connecting" || qr)) {
+          await requestPairingCode(activeSocket);
+        }
       }
 
       if (connection === "open") {
         isReady = true;
         clearReconnectTimer();
+        resetPairingState(activeSocket);
+        updateStatus({
+          state: "connected",
+          connected: true,
+          pairingCode: null,
+          qr: null,
+          message: "Connected to WhatsApp.",
+          lastError: null
+        });
 
         console.log("[WhatsApp] Connected");
 
@@ -260,11 +430,21 @@ function createWhatsAppBot(groupName) {
 
       isReady = false;
       groupId = null;
+      resetPairingState(activeSocket);
 
       const statusCode = lastDisconnect?.error?.output?.statusCode;
+      const errorMessage = lastDisconnect?.error?.message || null;
 
       if (statusCode === DisconnectReason.restartRequired) {
         console.log("[WhatsApp] Restart required; reconnecting...");
+        updateStatus({
+          state: "reconnecting",
+          connected: false,
+          pairingCode: null,
+          qr: null,
+          message: "WhatsApp restart required. Reconnecting...",
+          lastError: errorMessage
+        });
         clearReconnectTimer();
         initialize().catch((error) => {
           console.error(`[WhatsApp] Initialization failed: ${error.message}`);
@@ -275,6 +455,17 @@ function createWhatsAppBot(groupName) {
 
       if (statusCode === DisconnectReason.loggedOut) {
         console.warn("[WhatsApp] Session logged out; resetting session and reconnecting.");
+        preferQrLogin =
+          authMode === AUTH_MODE_QR ||
+          (!phoneNumber && authMode !== AUTH_MODE_PAIRING);
+        updateStatus({
+          state: "reconnecting",
+          connected: false,
+          pairingCode: null,
+          qr: null,
+          message: "WhatsApp session logged out. Resetting session and reconnecting...",
+          lastError: errorMessage
+        });
 
         try {
           await resetSessionDir();
@@ -290,7 +481,18 @@ function createWhatsAppBot(groupName) {
         statusCode === STREAM_METHOD_NOT_ALLOWED_STATUS &&
         !activeSocket.authState.creds.registered
       ) {
-        console.warn("[WhatsApp] Pairing session rejected; resetting session and reconnecting.");
+        preferQrLogin = true;
+        console.warn(
+          "[WhatsApp] Pairing session rejected; resetting session and reconnecting with QR fallback."
+        );
+        updateStatus({
+          state: "reconnecting",
+          connected: false,
+          pairingCode: null,
+          qr: null,
+          message: "Pairing code login was rejected. Switching to QR fallback...",
+          lastError: errorMessage || "Pairing session rejected"
+        });
 
         try {
           await resetSessionDir();
@@ -303,6 +505,14 @@ function createWhatsAppBot(groupName) {
       }
 
       console.warn(`[WhatsApp] Disconnected: ${statusCode || "unknown"}`);
+      updateStatus({
+        state: "reconnecting",
+        connected: false,
+        pairingCode: null,
+        qr: null,
+        message: `Disconnected${statusCode ? ` (${statusCode})` : ""}. Reconnecting...`,
+        lastError: errorMessage
+      });
       scheduleReconnect();
     });
   }
@@ -369,6 +579,7 @@ function createWhatsAppBot(groupName) {
   return {
     start,
     on: (eventName, handler) => events.on(eventName, handler),
+    getStatus,
     sendToGroup,
     sendMediaToGroup
   };

@@ -16,7 +16,8 @@ const { startRssEngine } = require("./rssEngine");
 const app = express();
 
 const PORT = Number(process.env.PORT) || 3000;
-const GROUP_NAME = process.env.GROUP_NAME || "نور الولاية";
+const GROUP_NAME = process.env.GROUP_NAME || "Your WhatsApp Group";
+let whatsappClient = null;
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -61,6 +62,23 @@ app.delete("/api/feeds", (req, res) => {
   res.json(result);
 });
 
+app.get("/api/whatsapp-status", (req, res) => {
+  res.set("Cache-Control", "no-store");
+  res.json(
+    whatsappClient?.getStatus?.() || {
+      state: "starting",
+      connected: false,
+      authMode: "auto",
+      phoneNumberConfigured: Boolean(process.env.WHATSAPP_NUMBER),
+      pairingCode: null,
+      qr: null,
+      message: "Starting WhatsApp connection...",
+      lastError: null,
+      updatedAt: new Date().toISOString()
+    }
+  );
+});
+
 
 // =====================
 // Frontend
@@ -91,7 +109,7 @@ async function main() {
 
   await listen();
 
-  const whatsappClient = createWhatsAppBot(GROUP_NAME);
+  whatsappClient = createWhatsAppBot(GROUP_NAME);
   let rssStarted = false;
 
   whatsappClient.on("ready", () => {

@@ -11,6 +11,36 @@
       <h1>Lebanon News Engine</h1>
 
       <section class="panel">
+        <div class="panel-heading">
+          <div>
+            <h2>WhatsApp Login</h2>
+            <p id="whatsappMessage" class="panel-copy">
+              Starting WhatsApp connection...
+            </p>
+          </div>
+          <span id="whatsappState" class="pill">Starting</span>
+        </div>
+
+        <div class="auth-grid">
+          <article id="pairingCard" class="auth-card hidden">
+            <h3>Pairing Code</h3>
+            <p class="panel-copy">
+              WhatsApp -> Linked Devices -> Link with phone number
+            </p>
+            <pre id="pairingCodeValue" class="pairing-code"></pre>
+          </article>
+
+          <article id="qrCard" class="auth-card hidden">
+            <h3>QR Fallback</h3>
+            <p class="panel-copy">
+              WhatsApp -> Linked Devices -> Link a device
+            </p>
+            <canvas id="qrCanvas" width="240" height="240"></canvas>
+          </article>
+        </div>
+      </section>
+
+      <section class="panel">
         <h2>Add RSS Feed</h2>
         <form id="feedForm">
           <input
@@ -30,15 +60,105 @@
       </section>
     </main>
 
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
     <script>
       const form = document.getElementById("feedForm");
       const feedUrlInput = document.getElementById("feedUrl");
       const feedsList = document.getElementById("feedsList");
       const statusMessage = document.getElementById("statusMessage");
+      const whatsappMessage = document.getElementById("whatsappMessage");
+      const whatsappState = document.getElementById("whatsappState");
+      const pairingCard = document.getElementById("pairingCard");
+      const pairingCodeValue = document.getElementById("pairingCodeValue");
+      const qrCard = document.getElementById("qrCard");
+      const qrCanvas = document.getElementById("qrCanvas");
+
+      let renderedQrValue = "";
 
       function setStatus(message, isError = false) {
         statusMessage.textContent = message;
         statusMessage.classList.toggle("error", isError);
+      }
+
+      function formatStateLabel(state) {
+        return String(state || "starting")
+          .split("_")
+          .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+          .join(" ");
+      }
+
+      function toggleHidden(element, shouldHide) {
+        element.classList.toggle("hidden", shouldHide);
+      }
+
+      function clearQrCanvas() {
+        const context = qrCanvas.getContext("2d");
+        context.clearRect(0, 0, qrCanvas.width, qrCanvas.height);
+        renderedQrValue = "";
+      }
+
+      async function renderQrCode(value) {
+        if (!value) {
+          clearQrCanvas();
+          return;
+        }
+
+        if (renderedQrValue === value) {
+          return;
+        }
+
+        if (!window.QRCode || typeof window.QRCode.toCanvas !== "function") {
+          whatsappMessage.textContent =
+            "QR renderer failed to load. Refresh the page and try again.";
+          return;
+        }
+
+        await window.QRCode.toCanvas(qrCanvas, value, {
+          width: 240,
+          margin: 1,
+          color: {
+            dark: "#111827",
+            light: "#ffffff"
+          }
+        });
+
+        renderedQrValue = value;
+      }
+
+      async function loadWhatsAppStatus() {
+        try {
+          const response = await fetch("/api/whatsapp-status", {
+            cache: "no-store"
+          });
+          const data = await response.json();
+
+          whatsappMessage.textContent =
+            data.message || "Waiting for WhatsApp login...";
+          whatsappState.textContent = formatStateLabel(data.state);
+          whatsappState.className = `pill state-${data.state || "starting"}`;
+
+          const pairingCode =
+            typeof data.pairingCode === "string" ? data.pairingCode.trim() : "";
+          const qrValue = typeof data.qr === "string" ? data.qr.trim() : "";
+
+          pairingCodeValue.textContent = pairingCode;
+          toggleHidden(pairingCard, !pairingCode);
+          toggleHidden(qrCard, !qrValue);
+
+          if (qrValue) {
+            await renderQrCode(qrValue);
+          } else {
+            clearQrCanvas();
+          }
+        } catch (error) {
+          whatsappMessage.textContent =
+            "Failed to load WhatsApp status. Check the server logs.";
+          whatsappState.textContent = "Unavailable";
+          whatsappState.className = "pill state-error";
+          toggleHidden(pairingCard, true);
+          toggleHidden(qrCard, true);
+          clearQrCanvas();
+        }
       }
 
       async function loadFeeds() {
@@ -83,7 +203,7 @@
           const response = await fetch("/api/feeds", {
             method: "DELETE",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ url }),
+            body: JSON.stringify({ url })
           });
 
           const data = await response.json();
@@ -112,7 +232,7 @@
           const response = await fetch("/api/feeds", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ url }),
+            body: JSON.stringify({ url })
           });
 
           const data = await response.json();
@@ -129,6 +249,8 @@
         }
       });
 
+      loadWhatsAppStatus();
+      setInterval(loadWhatsAppStatus, 5000);
       loadFeeds();
     </script>
   </body>

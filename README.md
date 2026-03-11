@@ -51,11 +51,13 @@ Create or edit `.env`:
 PORT=3000
 GROUP_NAME=Your WhatsApp Group
 WHATSAPP_NUMBER=961XXXXXXXX
+WHATSAPP_AUTH_MODE=auto
 GROQ_API_KEY=your_groq_api_key
 WHATSAPP_SESSION_DIR=/app/data/whatsapp-session
 ```
 
 `WHATSAPP_NUMBER` must be the WhatsApp account number in international format without `+` or spaces.
+`WHATSAPP_AUTH_MODE` supports `auto`, `pairing`, or `qr`. `auto` tries a pairing code first, then falls back to QR if WhatsApp rejects pair-code login.
 
 ## Run Locally
 
@@ -69,11 +71,12 @@ Then open `http://localhost:3000`.
 ## WhatsApp Setup
 
 1. Start the server.
-2. A pairing code will print in the terminal logs.
-3. In WhatsApp, open `Linked Devices`.
-4. Choose `Link with phone number`.
-5. Enter the printed pairing code.
-6. Keep the account in a group named exactly as `GROUP_NAME`.
+2. Open the dashboard.
+3. If pair-code login is accepted, the pairing code appears in the dashboard and terminal logs.
+4. If WhatsApp rejects pair-code login, the dashboard switches to a QR fallback automatically.
+5. In WhatsApp, open `Linked Devices`.
+6. Choose `Link with phone number` for a pairing code, or `Link a device` for QR fallback.
+7. Keep the account in a group named exactly as `GROUP_NAME`.
 
 Session data is stored under `WHATSAPP_SESSION_DIR`, so future restarts do not need a new pairing code unless the session expires.
 
@@ -81,8 +84,9 @@ Session data is stored under `WHATSAPP_SESSION_DIR`, so future restarts do not n
 
 - Mount the Railway volume at `/app/data`.
 - Set `WHATSAPP_NUMBER` in Railway to the WhatsApp account number, for example `961XXXXXXXX`.
+- Leave `WHATSAPP_AUTH_MODE=auto` unless you want to force QR login.
 - The WhatsApp session files are persisted at `/app/data/whatsapp-session`.
-- On first login, the app prints a pairing code in the Railway logs instead of a QR link.
+- On first login, the dashboard shows the current WhatsApp auth state and exposes either a pairing code or a QR fallback.
 
 ## Dashboard Features
 
