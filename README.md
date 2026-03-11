@@ -51,6 +51,7 @@ Create or edit `.env`:
 PORT=3000
 GROUP_NAME=نور الولاية
 LIBRETRANSLATE_URL=https://libretranslate.de/translate
+WHATSAPP_SESSION_DIR=/app/data/whatsapp-session
 # PUPPETEER_EXECUTABLE_PATH=C:\Program Files\Google\Chrome\Application\chrome.exe
 ```
 
@@ -72,7 +73,14 @@ Then open:
 3. Scan it from WhatsApp (`Linked Devices`).
 4. Keep the account in a group named exactly as `GROUP_NAME`.
 
-Session is persisted with `LocalAuth`, so future restarts do not need QR unless session expires.
+Session data is stored under `WHATSAPP_SESSION_DIR`, so future restarts do not need QR unless the session expires.
+
+## Railway Deployment
+
+- Mount the Railway volume at `/app/data`.
+- The WhatsApp session profile is persisted at `/app/data/whatsapp-session`.
+- Chromium launches from a unique `/tmp/chrome-*` profile on every boot and syncs the active session back to the mounted volume.
+- On first login, the app prints a QR login link in the Railway logs.
 
 ## Dashboard Features
 
