@@ -9,6 +9,7 @@ const SESSION_ROOT =
 const RECONNECT_DELAY_MS = 5000;
 
 let baileysModulePromise = null;
+let pairingRequested = false;
 
 function loadBaileys() {
   if (!baileysModulePromise) {
@@ -49,7 +50,6 @@ function createWhatsAppBot(groupName) {
   let isReady = false;
   let groupId = null;
   let reconnectTimer = null;
-  let pairingRequested = false;
   let startPromise = null;
   let resolveStart = null;
   let rejectStart = null;
@@ -127,7 +127,7 @@ function createWhatsAppBot(groupName) {
   }
 
   async function printPairingCode(activeSocket) {
-    if (!activeSocket || activeSocket.authState.creds.registered) {
+    if (!activeSocket) {
       return;
     }
 
@@ -143,21 +143,21 @@ function createWhatsAppBot(groupName) {
       return;
     }
 
-    pairingRequested = true;
-
     try {
-      const code = await activeSocket.requestPairingCode(phoneNumber);
+      if (!pairingRequested && !activeSocket.authState.creds.registered) {
+        pairingRequested = true;
+        const code = await activeSocket.requestPairingCode(phoneNumber);
 
-      console.log("");
-      console.log("================================");
-      console.log("WHATSAPP PAIRING CODE:");
-      console.log(code);
-      console.log("================================");
-      console.log("Enter this code in WhatsApp:");
-      console.log("WhatsApp -> Linked Devices -> Link with phone number");
-      console.log("");
+        console.log("");
+        console.log("================================");
+        console.log("WHATSAPP PAIRING CODE:");
+        console.log(code);
+        console.log("================================");
+        console.log("Enter this code in WhatsApp:");
+        console.log("WhatsApp -> Linked Devices -> Link with phone number");
+        console.log("");
+      }
     } catch (error) {
-      pairingRequested = false;
       console.error(`[WhatsApp] Failed to request pairing code: ${error.message}`);
       scheduleReconnect();
     }
@@ -206,7 +206,6 @@ function createWhatsAppBot(groupName) {
 
       if (connection === "open") {
         isReady = true;
-        pairingRequested = false;
         clearReconnectTimer();
 
         console.log("[WhatsApp] Connected");
@@ -224,7 +223,6 @@ function createWhatsAppBot(groupName) {
 
       isReady = false;
       groupId = null;
-      pairingRequested = false;
 
       const statusCode = lastDisconnect?.error?.output?.statusCode;
 
@@ -239,7 +237,7 @@ function createWhatsAppBot(groupName) {
       }
 
       if (statusCode === DisconnectReason.loggedOut) {
-        console.warn("[WhatsApp] Session logged out; requesting a fresh pairing code.");
+        console.warn("[WhatsApp] Session logged out; resetting session and reconnecting.");
 
         try {
           await resetSessionDir();
