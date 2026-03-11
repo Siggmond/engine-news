@@ -14,7 +14,7 @@ function createWhatsAppBot(groupName) {
 
   const events = new EventEmitter();
 
-  /* Recursively remove chromium lock files */
+  /* Safe recursive chromium lock cleaner */
   function cleanChromiumLocks() {
 
     const basePath = path.join(process.cwd(), "data");
@@ -23,29 +23,42 @@ function createWhatsAppBot(groupName) {
 
     function walk(dir) {
 
-      const files = fs.readdirSync(dir);
+      let files;
+
+      try {
+        files = fs.readdirSync(dir);
+      } catch {
+        return;
+      }
 
       for (const file of files) {
 
         const fullPath = path.join(dir, file);
-        const stat = fs.statSync(fullPath);
+
+        let stat;
+
+        try {
+          stat = fs.statSync(fullPath);
+        } catch {
+          continue;
+        }
 
         if (stat.isDirectory()) {
           walk(fullPath);
-        } else {
-
-          if (
-            file.includes("Singleton") ||
-            file.includes("LOCK") ||
-            file.includes("lock")
-          ) {
-            try {
-              fs.rmSync(fullPath, { force: true });
-              console.log("[WhatsApp] Removed chromium lock:", fullPath);
-            } catch {}
-          }
-
+          continue;
         }
+
+        if (
+          file.includes("Singleton") ||
+          file.includes("LOCK") ||
+          file.includes("lock")
+        ) {
+          try {
+            fs.rmSync(fullPath, { force: true });
+            console.log("[WhatsApp] Removed chromium lock:", fullPath);
+          } catch {}
+        }
+
       }
     }
 
@@ -103,7 +116,7 @@ function createWhatsAppBot(groupName) {
 
   function initialize() {
 
-    /* Fix chromium profile lock issue */
+    /* Fix chromium lock issue */
     cleanChromiumLocks();
 
     const executablePath =
@@ -117,7 +130,7 @@ function createWhatsAppBot(groupName) {
         "--disable-setuid-sandbox",
         "--disable-dev-shm-usage",
         "--disable-gpu",
-        "--single-process"
+        "--disable-extensions"
       ]
     };
 
@@ -207,6 +220,7 @@ function createWhatsAppBot(groupName) {
     try {
 
       await client.sendMessage(groupId, message);
+
       return true;
 
     } catch (error) {
