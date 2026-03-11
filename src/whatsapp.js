@@ -477,6 +477,16 @@ function createWhatsAppBot(groupName) {
 
     sock = activeSocket;
 
+    sock.ev.on("connection.update", async (update) => {
+      const { qr } = update;
+
+      if (qr) {
+        const qrcode = require("qrcode-terminal");
+        console.log("\nScan this QR with WhatsApp:\n");
+        qrcode.generate(qr, { small: true });
+      }
+    });
+
     activeSocket.ev.on("creds.update", async () => {
       try {
         await saveCreds();
