@@ -8,39 +8,28 @@ function createWhatsAppBot(groupName) {
 
   let sock = null;
   let groupId = null;
-  let pairingPrinted = false;
+  let reconnecting = false;
 
   const events = new EventEmitter();
   const sessionPath = path.join(process.cwd(), "data", "baileys-session");
 
   async function resolveGroup() {
-
     try {
-
       const groups = await sock.groupFetchAllParticipating();
 
       for (const id in groups) {
-
         if (groups[id].subject === groupName) {
-
           groupId = id;
-
           console.log("[WhatsApp] Group resolved:", groupName);
-
           return;
-
         }
-
       }
 
       console.log("[WhatsApp] Group not found:", groupName);
 
     } catch (err) {
-
       console.log("[WhatsApp] Failed resolving group:", err.message);
-
     }
-
   }
 
   async function start() {
@@ -60,37 +49,28 @@ function createWhatsAppBot(groupName) {
 
     sock.ev.on("connection.update", async (update) => {
 
-      const { connection, lastDisconnect } = update;
+      const { connection, qr, lastDisconnect } = update;
+
+      if (qr) {
+
+        const qrUrl =
+          "https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=" +
+          encodeURIComponent(qr);
+
+        console.log("\n==============================");
+        console.log("WhatsApp Login Required");
+        console.log("==============================\n");
+        console.log("Open this link and scan with WhatsApp:\n");
+        console.log(qrUrl);
+        console.log("\n");
+
+      }
 
       if (connection === "open") {
 
         console.log("WhatsApp connected");
 
-        if (!sock.authState.creds.registered && !pairingPrinted) {
-
-          pairingPrinted = true;
-
-          const phone = process.env.WHATSAPP_NUMBER;
-
-          try {
-
-            const code = await sock.requestPairingCode(phone);
-
-            console.log("");
-            console.log("================================");
-            console.log("WhatsApp PAIRING CODE:");
-            console.log(code);
-            console.log("Enter it in WhatsApp → Linked Devices");
-            console.log("================================");
-            console.log("");
-
-          } catch (err) {
-
-            console.log("Pairing code failed:", err.message);
-
-          }
-
-        }
+        reconnecting = false;
 
         await resolveGroup();
 
@@ -105,9 +85,11 @@ function createWhatsAppBot(groupName) {
 
         console.log("[WhatsApp] Connection closed");
 
-        if (shouldReconnect) {
+        if (shouldReconnect && !reconnecting) {
 
-          console.log("[WhatsApp] Reconnecting in 10s...");
+          reconnecting = true;
+
+          console.log("[WhatsApp] Reconnecting in 10 seconds...");
 
           setTimeout(() => {
             start();
