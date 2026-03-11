@@ -14,38 +14,42 @@ function createWhatsAppBot(groupName) {
 
   const events = new EventEmitter();
 
-  /* Remove chromium lock files left after crashes */
+  /* Recursively remove chromium lock files */
   function cleanChromiumLocks() {
 
-    const profilePath = path.join(
-      process.cwd(),
-      "data",
-      "LocalAuth",
-      "lebanon-news-engine"
-    );
+    const basePath = path.join(process.cwd(), "data");
 
-    if (!fs.existsSync(profilePath)) return;
+    if (!fs.existsSync(basePath)) return;
 
-    try {
+    function walk(dir) {
 
-      const files = fs.readdirSync(profilePath);
+      const files = fs.readdirSync(dir);
 
-      files.forEach(file => {
+      for (const file of files) {
 
-        if (
-          file.includes("Singleton") ||
-          file.includes("LOCK") ||
-          file.includes("lock")
-        ) {
-          try {
-            fs.rmSync(path.join(profilePath, file), { force: true });
-            console.log("[WhatsApp] Removed chromium lock:", file);
-          } catch {}
+        const fullPath = path.join(dir, file);
+        const stat = fs.statSync(fullPath);
+
+        if (stat.isDirectory()) {
+          walk(fullPath);
+        } else {
+
+          if (
+            file.includes("Singleton") ||
+            file.includes("LOCK") ||
+            file.includes("lock")
+          ) {
+            try {
+              fs.rmSync(fullPath, { force: true });
+              console.log("[WhatsApp] Removed chromium lock:", fullPath);
+            } catch {}
+          }
+
         }
+      }
+    }
 
-      });
-
-    } catch {}
+    walk(basePath);
   }
 
   async function resolveGroup() {
@@ -99,7 +103,7 @@ function createWhatsAppBot(groupName) {
 
   function initialize() {
 
-    /* fix chromium profile lock */
+    /* Fix chromium profile lock issue */
     cleanChromiumLocks();
 
     const executablePath =
@@ -203,7 +207,6 @@ function createWhatsAppBot(groupName) {
     try {
 
       await client.sendMessage(groupId, message);
-
       return true;
 
     } catch (error) {
