@@ -1,49 +1,49 @@
-﻿const Parser = require("rss-parser");
+const Parser = require("rss-parser");
 const cron = require("node-cron");
+
 const { hasPosted, addPosted, getFeeds } = require("./storage");
-const { isLebanonAirstrike } = require("./filter");
-const {
-  stripHtmlTags,
-  summarizeText,
-  translateToArabic,
-} = require("./translator");
+const { stripHtmlTags, summarizeText, translateToArabic } = require("./translator");
 
 const parser = new Parser({
-  timeout: 15000,
+  timeout: 15000
 });
 
-function extractSourceName(feed, item, feedUrl) {
-  if (typeof item.source === "string" && item.source.trim()) {
-    return item.source.trim();
-  }
-
-  if (item.source && typeof item.source.title === "string") {
-    return item.source.title.trim();
-  }
-
-  if (feed && feed.title) {
-    return feed.title;
-  }
-
-  try {
-    return new URL(feedUrl).hostname;
-  } catch {
-    return "Unknown source";
-  }
-}
-
-function formatMessage(title, summary, source) {
+function formatMessage(title, summary) {
   return `🕊 نور الولاية NEWS
 ━━━━━━━━━━━━
 
 ${title}
 
-${summary}
-
-🔗 المصدر: ${source}`;
+${summary}`;
 }
 
-async function processArticle(bot, article) {
+function extractMedia(item) {
+
+  if (item.enclosure?.url) return item.enclosure.url;
+
+  if (item["media:content"]?.url) return item["media:content"].url;
+
+  if (item["media:thumbnail"]?.url) return item["media:thumbnail"].url;
+
+  if (item.image?.url) return item.image.url;
+
+  return null;
+}
+
+function isInvalidPost(article) {
+
+  if (!article.title && !article.description) return true;
+
+  const text = `${article.title} ${article.description}`.trim();
+
+  if (text.length < 15) return true;
+
+  if (text.startsWith("http")) return true;
+
+  return false;
+}
+
+async function processArticle(bot, article, mediaUrl) {
 
   if (!article.link) return;
 
@@ -52,7 +52,12 @@ async function processArticle(bot, article) {
     return;
   }
 
-  console.log(`New article found: ${article.title || article.link}`);
+  if (isInvalidPost(article)) {
+    console.log("[RSS] Ignored invalid / short post");
+    return;
+  }
+
+  console.log(`New article found: ${article.title}`);
 
   const cleanTitle = stripHtmlTags(article.title || "خبر عاجل");
 
@@ -62,33 +67,30 @@ async function processArticle(bot, article) {
   );
 
   const arabicTitle = await translateToArabic(cleanTitle);
+
   const arabicSummary = await translateToArabic(cleanSummary);
-
-  const translatedArticle = {
-    title: arabicTitle,
-    description: arabicSummary,
-    source: article.source,
-  };
-
-  if (!isLebanonAirstrike(translatedArticle)) return;
-
-  const source = stripHtmlTags(article.source || "Unknown source");
 
   const message = formatMessage(
     arabicTitle || cleanTitle,
-    arabicSummary || cleanSummary || "لا يوجد ملخص متاح.",
-    source
+    arabicSummary || cleanSummary || ""
   );
 
-  const sent = await bot.sendToGroup(message);
+  let sent = false;
+
+  if (mediaUrl) {
+    sent = await bot.sendMediaToGroup(mediaUrl, message);
+  } else {
+    sent = await bot.sendToGroup(message);
+  }
 
   if (sent) {
     addPosted(article.link);
-    console.log(`Article sent to group: ${article.link}`);
+    console.log(`Article sent to group`);
   }
 }
 
 async function scanFeeds(bot) {
+
   const feeds = getFeeds();
 
   if (feeds.length === 0) {
@@ -97,12 +99,16 @@ async function scanFeeds(bot) {
   }
 
   for (const feedUrl of feeds) {
+
     try {
 
       const feed = await parser.parseURL(feedUrl);
+
       const items = Array.isArray(feed.items) ? feed.items : [];
 
       for (const item of items) {
+
+        const mediaUrl = extractMedia(item);
 
         const article = {
           title: item.title || "",
@@ -113,11 +119,10 @@ async function scanFeeds(bot) {
             item.description ||
             "",
           link: item.link || item.guid || "",
-          source: extractSourceName(feed, item, feedUrl),
-          contentSnippet: item.contentSnippet || "",
+          contentSnippet: item.contentSnippet || ""
         };
 
-        await processArticle(bot, article);
+        await processArticle(bot, article, mediaUrl);
 
       }
 
@@ -131,7 +136,7 @@ async function scanFeeds(bot) {
 
 function startRssEngine(bot) {
 
-  console.log("[RSS] Scheduler active: runs every 1 minutes");
+  console.log("[RSS] Scheduler active: runs every 1 minute");
 
   cron.schedule("* * * * *", () => {
 
@@ -148,5 +153,5 @@ function startRssEngine(bot) {
 
 module.exports = {
   startRssEngine,
-  scanFeeds,
+  scanFeeds
 };
