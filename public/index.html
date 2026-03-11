@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Lebanon News Engine</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <main class="container">
+      <h1>Lebanon News Engine</h1>
+
+      <section class="panel">
+        <h2>Add RSS Feed</h2>
+        <form id="feedForm">
+          <input
+            id="feedUrl"
+            type="url"
+            placeholder="https://example.com/rss.xml"
+            required
+          />
+          <button type="submit">Add Feed</button>
+        </form>
+        <p id="statusMessage" class="status"></p>
+      </section>
+
+      <section class="panel">
+        <h2>Active Feeds List</h2>
+        <ul id="feedsList"></ul>
+      </section>
+    </main>
+
+    <script>
+      const form = document.getElementById("feedForm");
+      const feedUrlInput = document.getElementById("feedUrl");
+      const feedsList = document.getElementById("feedsList");
+      const statusMessage = document.getElementById("statusMessage");
+
+      function setStatus(message, isError = false) {
+        statusMessage.textContent = message;
+        statusMessage.classList.toggle("error", isError);
+      }
+
+      async function loadFeeds() {
+        try {
+          const response = await fetch("/api/feeds");
+          const data = await response.json();
+          const feeds = Array.isArray(data.feeds) ? data.feeds : [];
+
+          feedsList.innerHTML = "";
+          if (feeds.length === 0) {
+            const item = document.createElement("li");
+            item.textContent = "No feeds added yet.";
+            item.className = "empty";
+            feedsList.appendChild(item);
+            return;
+          }
+
+          for (const feed of feeds) {
+            const item = document.createElement("li");
+            const url = document.createElement("span");
+            url.textContent = feed;
+            url.className = "feed-url";
+
+            const deleteBtn = document.createElement("button");
+            deleteBtn.textContent = "Delete Feed";
+            deleteBtn.className = "delete-btn";
+            deleteBtn.addEventListener("click", async () => {
+              await deleteFeed(feed);
+            });
+
+            item.appendChild(url);
+            item.appendChild(deleteBtn);
+            feedsList.appendChild(item);
+          }
+        } catch (error) {
+          setStatus("Failed to load feeds.", true);
+        }
+      }
+
+      async function deleteFeed(url) {
+        try {
+          const response = await fetch("/api/feeds", {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url }),
+          });
+
+          const data = await response.json();
+          if (!response.ok) {
+            setStatus(data.error || "Failed to delete feed.", true);
+            return;
+          }
+
+          setStatus("Feed deleted.");
+          await loadFeeds();
+        } catch (error) {
+          setStatus("Failed to delete feed.", true);
+        }
+      }
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const url = feedUrlInput.value.trim();
+
+        if (!url) {
+          setStatus("RSS Feed URL is required.", true);
+          return;
+        }
+
+        try {
+          const response = await fetch("/api/feeds", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url }),
+          });
+
+          const data = await response.json();
+          if (!response.ok) {
+            setStatus(data.error || "Failed to add feed.", true);
+            return;
+          }
+
+          setStatus("Feed added.");
+          form.reset();
+          await loadFeeds();
+        } catch (error) {
+          setStatus("Failed to add feed.", true);
+        }
+      });
+
+      loadFeeds();
+    </script>
+  </body>
+</html>
