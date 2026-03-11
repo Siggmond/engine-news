@@ -30,6 +30,7 @@ const EXCLUDED_PROFILE_DIRS = new Set([
   "GrShaderCache",
   "ShaderCache"
 ]);
+let qrPrinted = false;
 
 function isChromiumLockFile(fileName) {
   return (
@@ -255,6 +256,7 @@ function createWhatsAppBot(groupName) {
   let isReady = false;
   let groupId = null;
   let reconnectTimer = null;
+  let waitingForQrScan = false;
 
   const events = new EventEmitter();
 
@@ -286,11 +288,23 @@ function createWhatsAppBot(groupName) {
     }
   }
 
+  function clearReconnectTimer() {
+    if (!reconnectTimer) {
+      return;
+    }
+
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+
   function scheduleReconnect() {
-    if (reconnectTimer) return;
+    if (waitingForQrScan || reconnectTimer) {
+      return;
+    }
 
     reconnectTimer = setTimeout(async () => {
       reconnectTimer = null;
+      qrPrinted = false;
 
       console.log("[WhatsApp] Reconnecting...");
 
@@ -334,19 +348,29 @@ function createWhatsAppBot(groupName) {
     });
 
     client.on("qr", (qr) => {
-      console.log("\nWhatsApp login required\n");
+      waitingForQrScan = true;
+      clearReconnectTimer();
 
-      const qrUrl =
-        "https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=" +
-        encodeURIComponent(qr);
+      if (qr && !qrPrinted) {
+        qrPrinted = true;
 
-      console.log("Open this link and scan with WhatsApp:\n");
-      console.log(qrUrl);
-      console.log("\n");
+        const qrUrl =
+          "https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=" +
+          encodeURIComponent(qr);
+
+        console.log("\n==============================");
+        console.log("WhatsApp login required");
+        console.log("Open this link and scan:");
+        console.log(qrUrl);
+        console.log("==============================\n");
+      }
     });
 
     client.on("ready", async () => {
       isReady = true;
+      waitingForQrScan = false;
+      qrPrinted = false;
+      clearReconnectTimer();
 
       console.log("[WhatsApp] Connected");
 
@@ -358,10 +382,10 @@ function createWhatsAppBot(groupName) {
     client.on("auth_failure", (message) => {
       isReady = false;
       groupId = null;
+      waitingForQrScan = false;
+      qrPrinted = false;
 
       console.error(`[WhatsApp] Auth failure: ${message}`);
-
-      scheduleReconnect();
     });
 
     client.on("disconnected", (reason) => {
@@ -370,6 +394,11 @@ function createWhatsAppBot(groupName) {
 
       console.warn(`[WhatsApp] Disconnected: ${reason}`);
 
+      if (waitingForQrScan || reason === "LOGOUT") {
+        return;
+      }
+
+      qrPrinted = false;
       scheduleReconnect();
     });
 
@@ -379,6 +408,11 @@ function createWhatsAppBot(groupName) {
 
       console.error(`[WhatsApp] Initialization failed: ${error.message}`);
 
+      if (waitingForQrScan) {
+        return;
+      }
+
+      qrPrinted = false;
       scheduleReconnect();
     });
   }
