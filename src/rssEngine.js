@@ -8,13 +8,39 @@ const parser = new Parser({
   timeout: 15000
 });
 
+/* Format final WhatsApp message */
 function formatMessage(title, summary) {
+
+  const cleanTitle = title.trim();
+  const cleanSummary = summary.trim();
+
+  if (!cleanSummary) {
+    return `🕊 نور الولاية NEWS
+━━━━━━━━━━━━
+
+${cleanTitle}`;
+  }
+
+  if (cleanSummary === cleanTitle) {
+    return `🕊 نور الولاية NEWS
+━━━━━━━━━━━━
+
+${cleanTitle}`;
+  }
+
+  if (cleanSummary.includes(cleanTitle)) {
+    return `🕊 نور الولاية NEWS
+━━━━━━━━━━━━
+
+${cleanSummary}`;
+  }
+
   return `🕊 نور الولاية NEWS
 ━━━━━━━━━━━━
 
-${title}
+${cleanTitle}
 
-${summary}`;
+${cleanSummary}`;
 }
 
 /* Detect Arabic text so we don't translate it again */
@@ -37,6 +63,7 @@ function isPlaceholder(title) {
   );
 }
 
+/* Extract media URL if available */
 function extractMedia(item) {
 
   if (item.enclosure?.url) return item.enclosure.url;
@@ -50,6 +77,7 @@ function extractMedia(item) {
   return null;
 }
 
+/* Filter bad RSS posts */
 function isInvalidPost(article) {
 
   if (!article.title && !article.description) return true;
@@ -86,21 +114,26 @@ async function processArticle(bot, article, mediaUrl) {
 
   const cleanTitle = stripHtmlTags(article.title || "خبر عاجل");
 
-  const cleanSummary = stripHtmlTags(
+  let cleanSummary = stripHtmlTags(
     article.description || article.contentSnippet || ""
   );
+
+  /* Remove duplicated title in summary */
+  if (cleanSummary === cleanTitle) {
+    cleanSummary = "";
+  }
 
   let arabicTitle = cleanTitle;
   let arabicSummary = cleanSummary;
 
-  /* Only translate if the text is NOT Arabic */
+  /* Only translate if NOT Arabic */
   if (!isArabic(cleanTitle)) {
     arabicTitle = await translateToArabic(cleanTitle);
   }
 
-  if (!isArabic(cleanSummary)) {
+  if (cleanSummary && !isArabic(cleanSummary)) {
     arabicSummary = await translateToArabic(
-      summarizeText(cleanSummary, 3)
+      summarizeText(cleanSummary, 1)
     );
   }
 
