@@ -5,20 +5,16 @@ const path = require("path");
 const axios = require("axios");
 
 function createWhatsAppBot(groupName) {
-
   let sock = null;
   let groupId = null;
 
   const events = new EventEmitter();
-
   const sessionPath = path.join(process.cwd(), "data", "baileys-session");
 
   async function resolveGroup() {
-
     if (!sock) return;
 
     try {
-
       const groups = await sock.groupFetchAllParticipating();
 
       for (const id in groups) {
@@ -30,17 +26,12 @@ function createWhatsAppBot(groupName) {
       }
 
       console.log("[WhatsApp] Group not found:", groupName);
-
-    } catch (error) {
-
-      console.log("[WhatsApp] Failed resolving group:", error.message);
-
+    } catch (err) {
+      console.log("[WhatsApp] Failed resolving group:", err.message);
     }
-
   }
 
   async function start() {
-
     if (!fs.existsSync(sessionPath)) {
       fs.mkdirSync(sessionPath, { recursive: true });
     }
@@ -54,75 +45,59 @@ function createWhatsAppBot(groupName) {
 
     sock.ev.on("creds.update", saveCreds);
 
-    sock.ev.on("connection.update", async ({ connection, qr, lastDisconnect }) => {
+    sock.ev.on("connection.update", async (update) => {
+      const { connection, qr, lastDisconnect } = update;
 
       if (qr) {
-
-        console.log("\nWhatsApp Login Required\n");
+        console.log("\n==============================");
+        console.log("📱 WhatsApp LOGIN REQUIRED");
+        console.log("==============================\n");
 
         const qrLink =
           "https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=" +
           encodeURIComponent(qr);
 
-        console.log("Open this link and scan with WhatsApp:");
+        console.log("Open this link and scan with WhatsApp:\n");
         console.log(qrLink);
         console.log("");
-
       }
 
       if (connection === "open") {
-
-        console.log("WhatsApp connected");
+        console.log("✅ WhatsApp connected");
 
         await resolveGroup();
-
         events.emit("ready");
-
       }
 
       if (connection === "close") {
-
         const shouldReconnect =
           lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
 
-        console.log("WhatsApp connection closed");
+        console.log("[WhatsApp] Connection closed");
 
         if (shouldReconnect) {
           start();
         }
-
       }
-
     });
-
   }
 
   async function sendToGroup(message) {
-
     if (!sock || !groupId) return false;
 
     try {
-
       await sock.sendMessage(groupId, { text: message });
-
       return true;
-
-    } catch (error) {
-
-      console.log("[WhatsApp] Send failed:", error.message);
-
+    } catch (err) {
+      console.log("[WhatsApp] Send failed:", err.message);
       return false;
-
     }
-
   }
 
   async function sendMediaToGroup(url, caption) {
-
     if (!sock || !groupId) return false;
 
     try {
-
       const response = await axios.get(url, {
         responseType: "arraybuffer",
         timeout: 20000
@@ -136,15 +111,10 @@ function createWhatsAppBot(groupName) {
       });
 
       return true;
-
-    } catch (error) {
-
-      console.log("[WhatsApp] Media send failed:", error.message);
-
+    } catch (err) {
+      console.log("[WhatsApp] Media send failed:", err.message);
       return false;
-
     }
-
   }
 
   return {
@@ -153,7 +123,6 @@ function createWhatsAppBot(groupName) {
     sendToGroup,
     sendMediaToGroup
   };
-
 }
 
 module.exports = {
