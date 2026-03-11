@@ -3,20 +3,26 @@ const axios = require("axios");
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
 function stripHtmlTags(text) {
+
   if (!text) return "";
+
   return text.replace(/<[^>]*>?/gm, "");
+
 }
 
 function summarizeText(text, maxSentences = 3) {
+
   if (!text) return "";
 
   const cleaned = stripHtmlTags(text);
+
   const sentences = cleaned.split(/[.!?]/).filter(Boolean);
 
   return sentences.slice(0, maxSentences).join(". ") + ".";
 }
 
 async function translateToArabic(text) {
+
   try {
 
     if (!text || text.trim() === "") return "";
@@ -29,7 +35,7 @@ async function translateToArabic(text) {
           {
             role: "system",
             content:
-              "You are a translator. Only translate the text to Arabic. Do not explain anything. Do not add extra sentences. Return only the translated text."
+              "Translate the text to Arabic only. Do not add explanations."
           },
           {
             role: "user",
@@ -56,11 +62,7 @@ async function translateToArabic(text) {
 
   } catch (error) {
 
-    if (error.response) {
-      console.log("[Translator] Groq error:", error.response.data);
-    } else {
-      console.log("[Translator] AI translation failed:", error.message);
-    }
+    console.log("[Translator] Translation failed");
 
     return text;
   }
