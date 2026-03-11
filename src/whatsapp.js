@@ -59,6 +59,58 @@ function getConfiguredAuthMode() {
   return AUTH_MODE_AUTO;
 }
 
+function parseWaWebVersion(value) {
+  if (!value) {
+    return null;
+  }
+
+  const parts = String(value)
+    .trim()
+    .split(".")
+    .map((part) => Number(part));
+
+  if (
+    parts.length !== 3 ||
+    parts.some((part) => !Number.isInteger(part) || part < 0)
+  ) {
+    return null;
+  }
+
+  return parts;
+}
+
+async function resolveWaWebVersion(fetchLatestWaWebVersion) {
+  const configuredVersion = parseWaWebVersion(process.env.WHATSAPP_WEB_VERSION);
+
+  if (configuredVersion) {
+    console.log(
+      `[WhatsApp] Using configured WA Web version ${configuredVersion.join(".")}`
+    );
+    return configuredVersion;
+  }
+
+  if (typeof fetchLatestWaWebVersion !== "function") {
+    return null;
+  }
+
+  try {
+    const result = await fetchLatestWaWebVersion({ timeout: 10000 });
+
+    if (Array.isArray(result?.version) && result.version.length === 3) {
+      console.log(
+        `[WhatsApp] Using WA Web version ${result.version.join(".")}${result.isLatest ? "" : " (fallback)"}`
+      );
+      return result.version;
+    }
+  } catch (error) {
+    console.warn(
+      `[WhatsApp] Failed to fetch latest WA Web version: ${error.message}`
+    );
+  }
+
+  return null;
+}
+
 async function resetSessionDir() {
   await fs.promises.rm(SESSION_ROOT, { recursive: true, force: true });
   await fs.promises.mkdir(SESSION_ROOT, { recursive: true });
@@ -326,6 +378,7 @@ function createWhatsAppBot(groupName) {
       default: makeWASocket,
       Browsers,
       DisconnectReason,
+      fetchLatestWaWebVersion,
       useMultiFileAuthState
     } = await loadBaileys();
 
@@ -341,6 +394,7 @@ function createWhatsAppBot(groupName) {
     });
 
     const { state, saveCreds } = await useMultiFileAuthState(SESSION_ROOT);
+    const waVersion = await resolveWaWebVersion(fetchLatestWaWebVersion);
 
     const activeSocket = makeWASocket({
       auth: state,
@@ -349,7 +403,8 @@ function createWhatsAppBot(groupName) {
       logger: createSilentLogger(),
       markOnlineOnConnect: false,
       printQRInTerminal: false,
-      syncFullHistory: false
+      syncFullHistory: false,
+      ...(waVersion ? { version: waVersion } : {})
     });
 
     sock = activeSocket;

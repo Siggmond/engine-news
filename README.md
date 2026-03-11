@@ -52,12 +52,14 @@ PORT=3000
 GROUP_NAME=Your WhatsApp Group
 WHATSAPP_NUMBER=961XXXXXXXX
 WHATSAPP_AUTH_MODE=auto
+WHATSAPP_WEB_VERSION=
 GROQ_API_KEY=your_groq_api_key
 WHATSAPP_SESSION_DIR=/app/data/whatsapp-session
 ```
 
 `WHATSAPP_NUMBER` must be the WhatsApp account number in international format without `+` or spaces.
 `WHATSAPP_AUTH_MODE` supports `auto`, `pairing`, or `qr`. `auto` tries a pairing code first, then falls back to QR if WhatsApp rejects pair-code login.
+`WHATSAPP_WEB_VERSION` is optional and should be in the form `2.3000.1234567890` if you need to pin a specific WhatsApp Web revision.
 
 ## Run Locally
 
@@ -85,6 +87,7 @@ Session data is stored under `WHATSAPP_SESSION_DIR`, so future restarts do not n
 - Mount the Railway volume at `/app/data`.
 - Set `WHATSAPP_NUMBER` in Railway to the WhatsApp account number, for example `961XXXXXXXX`.
 - Leave `WHATSAPP_AUTH_MODE=auto` unless you want to force QR login.
+- Leave `WHATSAPP_WEB_VERSION` empty by default. Set it only if you need to pin a working WhatsApp Web revision.
 - The WhatsApp session files are persisted at `/app/data/whatsapp-session`.
 - On first login, the dashboard shows the current WhatsApp auth state and exposes either a pairing code or a QR fallback.
 
