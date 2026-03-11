@@ -8,28 +8,41 @@ function createWhatsAppBot(groupName) {
 
   let sock = null;
   let groupId = null;
+  let pairingRequested = false;
 
   const events = new EventEmitter();
   const sessionPath = path.join(process.cwd(), "data", "baileys-session");
 
   async function resolveGroup() {
+
     if (!sock) return;
 
     try {
+
       const groups = await sock.groupFetchAllParticipating();
 
       for (const id in groups) {
+
         if (groups[id].subject === groupName) {
+
           groupId = id;
+
           console.log("[WhatsApp] Group resolved:", groupName);
+
           return;
+
         }
+
       }
 
       console.log("[WhatsApp] Group not found:", groupName);
+
     } catch (err) {
+
       console.log("[WhatsApp] Failed resolving group:", err.message);
+
     }
+
   }
 
   async function start() {
@@ -47,22 +60,41 @@ function createWhatsAppBot(groupName) {
 
     sock.ev.on("creds.update", saveCreds);
 
-    // Pairing code login (reliable on servers)
-    if (!sock.authState.creds.registered) {
+    sock.ev.on("connection.update", async (update) => {
 
-      const phoneNumber = process.env.WHATSAPP_NUMBER;
+      const { connection, lastDisconnect } = update;
 
-      const code = await sock.requestPairingCode(phoneNumber);
+      if (connection === "connecting") {
 
-      console.log("\n==============================");
-      console.log("WhatsApp PAIRING CODE");
-      console.log("==============================\n");
-      console.log("Enter this code in WhatsApp → Linked Devices:\n");
-      console.log(code);
-      console.log("");
-    }
+        if (!pairingRequested && !sock.authState.creds.registered) {
 
-    sock.ev.on("connection.update", async ({ connection, lastDisconnect }) => {
+          pairingRequested = true;
+
+          const phone = process.env.WHATSAPP_NUMBER;
+
+          setTimeout(async () => {
+
+            try {
+
+              const code = await sock.requestPairingCode(phone);
+
+              console.log("\n==============================");
+              console.log("WhatsApp PAIRING CODE");
+              console.log("==============================\n");
+              console.log(code);
+              console.log("\nEnter this code in WhatsApp → Linked Devices\n");
+
+            } catch (err) {
+
+              console.log("Pairing code failed:", err.message);
+
+            }
+
+          }, 5000);
+
+        }
+
+      }
 
       if (connection === "open") {
 
@@ -71,6 +103,7 @@ function createWhatsAppBot(groupName) {
         await resolveGroup();
 
         events.emit("ready");
+
       }
 
       if (connection === "close") {
@@ -81,9 +114,15 @@ function createWhatsAppBot(groupName) {
         console.log("[WhatsApp] Connection closed");
 
         if (shouldReconnect) {
+
           console.log("[WhatsApp] Reconnecting...");
+
+          pairingRequested = false;
+
           start();
+
         }
+
       }
 
     });
@@ -146,6 +185,7 @@ function createWhatsAppBot(groupName) {
     sendToGroup,
     sendMediaToGroup
   };
+
 }
 
 module.exports = {
