@@ -11,6 +11,7 @@ const STREAM_METHOD_NOT_ALLOWED_STATUS = 405;
 const AUTH_MODE_AUTO = "auto";
 const AUTH_MODE_PAIRING = "pairing";
 const AUTH_MODE_QR = "qr";
+const PAIRING_REQUEST_DELAY_MS = 1000;
 
 let baileysModulePromise = null;
 
@@ -114,6 +115,10 @@ async function resolveWaWebVersion(fetchLatestWaWebVersion) {
 async function resetSessionDir() {
   await fs.promises.rm(SESSION_ROOT, { recursive: true, force: true });
   await fs.promises.mkdir(SESSION_ROOT, { recursive: true });
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function createWhatsAppBot(groupName) {
@@ -284,6 +289,10 @@ function createWhatsAppBot(groupName) {
   }
 
   function setPairingCodeStatus(code) {
+    if (!code) {
+      return;
+    }
+
     updateStatus({
       state: "pairing_code",
       connected: false,
@@ -340,6 +349,12 @@ function createWhatsAppBot(groupName) {
       promise: (async () => {
         try {
           setWaitingStatus();
+          await activeSocket.waitForSocketOpen();
+          await wait(PAIRING_REQUEST_DELAY_MS);
+
+          if (sock !== activeSocket || activeSocket.authState.creds.registered) {
+            return;
+          }
 
           const code = await activeSocket.requestPairingCode(phoneNumber);
 
@@ -363,13 +378,20 @@ function createWhatsAppBot(groupName) {
             return;
           }
 
-          preferQrLogin = true;
           console.error(`[WhatsApp] Failed to request pairing code: ${error.message}`);
+
+          const savedPairingCode = activeSocket.authState.creds.pairingCode;
+
+          if (savedPairingCode) {
+            setPairingCodeStatus(savedPairingCode);
+            return;
+          }
+
           updateStatus({
             state: "waiting",
             connected: false,
             pairingCode: null,
-            message: "Pairing code failed. Waiting for QR fallback...",
+            message: "Pairing code request failed. Reconnecting...",
             lastError: error.message
           });
         } finally {
@@ -456,6 +478,7 @@ function createWhatsAppBot(groupName) {
       }
 
       const { connection, lastDisconnect, qr } = update;
+      const savedPairingCode = activeSocket.authState.creds.pairingCode;
 
       if (!activeSocket.authState.creds.registered) {
         if (qr && shouldUseQr()) {
@@ -467,6 +490,8 @@ function createWhatsAppBot(groupName) {
             message: "Scan this QR code in WhatsApp > Linked Devices > Link a device.",
             lastError: null
           });
+        } else if (savedPairingCode) {
+          setPairingCodeStatus(savedPairingCode);
         } else if (connection === "connecting" && !status.qr) {
           setWaitingStatus();
         }
