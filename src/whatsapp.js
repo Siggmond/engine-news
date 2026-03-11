@@ -1,5 +1,4 @@
 const { Client, LocalAuth, MessageMedia } = require("whatsapp-web.js");
-const qrcode = require("qrcode-terminal");
 const { EventEmitter } = require("events");
 const axios = require("axios");
 const mime = require("mime-types");
@@ -77,22 +76,40 @@ function createWhatsAppBot(groupName) {
       args: [
         "--no-sandbox",
         "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage"
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--single-process"
       ]
     };
 
-    if (executablePath) puppeteerConfig.executablePath = executablePath;
+    if (executablePath) {
+      puppeteerConfig.executablePath = executablePath;
+    }
 
     client = new Client({
-      authStrategy: new LocalAuth({ clientId: "lebanon-news-engine" }),
+
+      authStrategy: new LocalAuth({
+        clientId: "lebanon-news-engine",
+        dataPath: "./data/whatsapp-session"
+      }),
+
       puppeteer: puppeteerConfig
+
     });
 
     client.on("qr", qr => {
 
-      console.log("QR generated");
+      console.log("\n📱 WhatsApp Login Required\n");
 
-      qrcode.generate(qr, { small: true });
+      const qrUrl =
+        "https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=" +
+        encodeURIComponent(qr);
+
+      console.log("Open this link and scan with WhatsApp:\n");
+
+      console.log(qrUrl);
+
+      console.log("\n");
 
     });
 
@@ -100,7 +117,7 @@ function createWhatsAppBot(groupName) {
 
       isReady = true;
 
-      console.log("WhatsApp connected");
+      console.log("✅ WhatsApp connected");
 
       await resolveGroup();
 
@@ -210,4 +227,4 @@ function createWhatsAppBot(groupName) {
 
 module.exports = {
   createWhatsAppBot
-};;
+};
