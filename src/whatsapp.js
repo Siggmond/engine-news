@@ -1,5 +1,4 @@
 const { Client, LocalAuth } = require("whatsapp-web.js");
-const qrcode = require("qrcode-terminal");
 const { EventEmitter } = require("events");
 
 function createWhatsAppBot(groupName) {
@@ -83,14 +82,21 @@ function createWhatsAppBot(groupName) {
     });
 
     client.on("qr", (qr) => {
-      console.log("QR generated");
-      qrcode.generate(qr, { small: true });
+      console.log("\n📱 WhatsApp Login Required");
+      console.log("Open this link in your browser and scan the QR:\n");
+
+      const qrUrl =
+        "https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=" +
+        encodeURIComponent(qr);
+
+      console.log(qrUrl);
+      console.log("\n");
     });
 
     client.on("ready", async () => {
       isReady = true;
 
-      console.log("WhatsApp connected");
+      console.log("✅ WhatsApp connected");
 
       await resolveGroup();
 
