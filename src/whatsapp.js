@@ -2,6 +2,7 @@ const { Client, LocalAuth, MessageMedia } = require("whatsapp-web.js");
 const { EventEmitter } = require("events");
 const axios = require("axios");
 const mime = require("mime-types");
+const path = require("path");
 
 function createWhatsAppBot(groupName) {
 
@@ -55,9 +56,7 @@ function createWhatsAppBot(groupName) {
       console.log("[WhatsApp] Reconnecting...");
 
       try {
-
         if (client) await client.destroy();
-
       } catch {}
 
       initialize();
@@ -90,7 +89,7 @@ function createWhatsAppBot(groupName) {
 
       authStrategy: new LocalAuth({
         clientId: "lebanon-news-engine",
-        dataPath: "./data/whatsapp-session"
+        dataPath: path.join(process.cwd(), "data")
       }),
 
       puppeteer: puppeteerConfig
@@ -106,9 +105,7 @@ function createWhatsAppBot(groupName) {
         encodeURIComponent(qr);
 
       console.log("Open this link and scan with WhatsApp:\n");
-
       console.log(qrUrl);
-
       console.log("\n");
 
     });
@@ -128,7 +125,6 @@ function createWhatsAppBot(groupName) {
     client.on("auth_failure", message => {
 
       isReady = false;
-
       groupId = null;
 
       console.error(`[WhatsApp] Auth failure: ${message}`);
@@ -140,7 +136,6 @@ function createWhatsAppBot(groupName) {
     client.on("disconnected", reason => {
 
       isReady = false;
-
       groupId = null;
 
       console.warn(`[WhatsApp] Disconnected: ${reason}`);
@@ -152,7 +147,6 @@ function createWhatsAppBot(groupName) {
     client.initialize().catch(error => {
 
       isReady = false;
-
       groupId = null;
 
       console.error(`[WhatsApp] Initialization failed: ${error.message}`);
@@ -195,7 +189,8 @@ function createWhatsAppBot(groupName) {
     try {
 
       const response = await axios.get(url, {
-        responseType: "arraybuffer"
+        responseType: "arraybuffer",
+        timeout: 20000
       });
 
       const mimeType = mime.lookup(url) || "image/jpeg";
