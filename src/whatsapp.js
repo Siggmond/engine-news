@@ -1,4 +1,4 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require("@whiskeysockets/baileys");
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require("@whiskeysockets/baileys");
 const { EventEmitter } = require("events");
 const fs = require("fs");
 const path = require("path");
@@ -15,6 +15,7 @@ function createWhatsAppBot(groupName) {
 
   async function resolveGroup() {
     try {
+
       const groups = await sock.groupFetchAllParticipating();
 
       for (const id in groups) {
@@ -40,9 +41,13 @@ function createWhatsAppBot(groupName) {
 
     const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
 
+    const { version } = await fetchLatestBaileysVersion();
+
     sock = makeWASocket({
       auth: state,
-      browser: ["Ubuntu", "Chrome", "120.0.0"]
+      version,
+      browser: ["Ubuntu", "Chrome", "120.0.0"],
+      printQRInTerminal: false
     });
 
     sock.ev.on("creds.update", saveCreds);
@@ -51,24 +56,27 @@ function createWhatsAppBot(groupName) {
 
       const { connection, qr, lastDisconnect } = update;
 
+      /* SHOW QR LINK */
       if (qr) {
 
         const qrUrl =
           "https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=" +
           encodeURIComponent(qr);
 
-        console.log("\n==============================");
-        console.log("WhatsApp Login Required");
-        console.log("==============================\n");
-        console.log("Open this link and scan with WhatsApp:\n");
+        console.log("");
+        console.log("====================================");
+        console.log("WHATSAPP LOGIN REQUIRED");
+        console.log("====================================");
+        console.log("Open this link and scan:");
         console.log(qrUrl);
-        console.log("\n");
+        console.log("====================================");
+        console.log("");
 
       }
 
       if (connection === "open") {
 
-        console.log("WhatsApp connected");
+        console.log("WhatsApp connected successfully");
 
         reconnecting = false;
 
