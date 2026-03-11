@@ -53,6 +53,7 @@ GROUP_NAME=Your WhatsApp Group
 WHATSAPP_NUMBER=961XXXXXXXX
 WHATSAPP_AUTH_MODE=auto
 WHATSAPP_WEB_VERSION=
+WHATSAPP_SESSION_B64=
 GROQ_API_KEY=your_groq_api_key
 WHATSAPP_SESSION_DIR=/app/data/whatsapp-session
 ```
@@ -60,6 +61,7 @@ WHATSAPP_SESSION_DIR=/app/data/whatsapp-session
 `WHATSAPP_NUMBER` must be the WhatsApp account number in international format without `+` or spaces.
 `WHATSAPP_AUTH_MODE` supports `auto`, `pairing`, or `qr`. `auto` tries a pairing code first, then falls back to QR if WhatsApp rejects pair-code login.
 `WHATSAPP_WEB_VERSION` is optional and should be in the form `2.3000.1234567890` if you need to pin a specific WhatsApp Web revision.
+`WHATSAPP_SESSION_B64` is optional and lets you import a locally paired WhatsApp session into Railway.
 
 ## Run Locally
 
@@ -88,8 +90,25 @@ Session data is stored under `WHATSAPP_SESSION_DIR`, so future restarts do not n
 - Set `WHATSAPP_NUMBER` in Railway to the WhatsApp account number, for example `961XXXXXXXX`.
 - Leave `WHATSAPP_AUTH_MODE=auto` unless you want to force QR login.
 - Leave `WHATSAPP_WEB_VERSION` empty by default. Set it only if you need to pin a working WhatsApp Web revision.
+- If first-time login is unstable on Railway, pair locally once and paste the exported session into `WHATSAPP_SESSION_B64`.
 - The WhatsApp session files are persisted at `/app/data/whatsapp-session`.
 - On first login, the dashboard shows the current WhatsApp auth state and exposes either a pairing code or a QR fallback.
+
+## Local Pairing For Railway
+
+1. On your own machine, run the app locally.
+2. Set `WHATSAPP_AUTH_MODE=qr` locally.
+3. Complete the WhatsApp login locally.
+4. Run:
+
+```bash
+npm run export:whatsapp-session
+```
+
+5. Copy the printed value into Railway as `WHATSAPP_SESSION_B64`.
+6. Redeploy Railway.
+
+After that, Railway should reuse the imported session instead of doing first-time pairing on the server.
 
 ## Dashboard Features
 

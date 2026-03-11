@@ -4,7 +4,8 @@
   "description": "Automated Lebanon war news engine for WhatsApp groups with RSS dashboard and Arabic translation.",
   "main": "src/server.js",
   "scripts": {
-    "start": "node src/server.js"
+    "start": "node src/server.js",
+    "export:whatsapp-session": "node scripts/export-whatsapp-session.js"
   },
   "keywords": [
     "whatsapp",

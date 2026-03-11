@@ -2,6 +2,7 @@ const { EventEmitter } = require("events");
 const fs = require("fs");
 const path = require("path");
 const axios = require("axios");
+const { importSessionFromEnv } = require("./whatsappSession");
 
 const SESSION_ROOT =
   process.env.WHATSAPP_SESSION_DIR ||
@@ -433,6 +434,18 @@ function createWhatsAppBot(groupName) {
     } = await loadBaileys();
 
     await fs.promises.mkdir(SESSION_ROOT, { recursive: true });
+    try {
+      const importResult = await importSessionFromEnv(SESSION_ROOT);
+
+      if (importResult.imported) {
+        console.log(
+          `[WhatsApp] Imported ${importResult.fileCount} session files from WHATSAPP_SESSION_B64`
+        );
+      }
+    } catch (error) {
+      console.error(`[WhatsApp] Failed to import session from env: ${error.message}`);
+    }
+
     resetPairingState();
     updateStatus({
       state: "starting",
