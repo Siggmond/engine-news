@@ -6,7 +6,7 @@ const { importSessionFromEnv } = require("./whatsappSession");
 
 const SESSION_ROOT =
   process.env.WHATSAPP_SESSION_DIR ||
-  path.join(process.cwd(), "data", "whatsapp-session");
+  path.join(process.cwd(), "whatsapp-session");
 const RECONNECT_DELAY_MS = 5000;
 const STREAM_METHOD_NOT_ALLOWED_STATUS = 405;
 const AUTH_MODE_AUTO = "auto";
