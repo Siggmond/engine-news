@@ -12,6 +12,7 @@ const AUTH_MODE_AUTO = "auto";
 const AUTH_MODE_PAIRING = "pairing";
 const AUTH_MODE_QR = "qr";
 const PAIRING_REQUEST_DELAY_MS = 1000;
+const PAIRING_CODE_HOLD_MS = 65000;
 const PRELOGIN_DISCONNECTS_BEFORE_QR_FALLBACK = 3;
 
 let baileysModulePromise = null;
@@ -237,7 +238,7 @@ function createWhatsAppBot(groupName) {
     rejectStart = null;
   }
 
-  function scheduleReconnect() {
+  function scheduleReconnect(delayMs = RECONNECT_DELAY_MS) {
     if (reconnectTimer) {
       return;
     }
@@ -249,7 +250,7 @@ function createWhatsAppBot(groupName) {
         console.error(`[WhatsApp] Initialization failed: ${error.message}`);
         scheduleReconnect();
       });
-    }, RECONNECT_DELAY_MS);
+    }, delayMs);
   }
 
   function logPairingCode(code) {
@@ -261,11 +262,11 @@ function createWhatsAppBot(groupName) {
 
     console.log("");
     console.log("================================");
-    console.log("WHATSAPP PAIRING CODE:");
-    console.log(code);
+    console.log(`WHATSAPP PAIRING CODE: ${code}`);
     console.log("================================");
     console.log("Enter this code in WhatsApp:");
     console.log("WhatsApp -> Linked Devices -> Link with phone number");
+    console.log("Wait at least 1 minute before requesting a new code.");
     console.log("");
   }
 
@@ -594,19 +595,26 @@ function createWhatsAppBot(groupName) {
           console.warn(
             "[WhatsApp] Pre-login session disconnected; reconnecting without resetting the pending pairing state."
           );
+          if (pendingPairingCode) {
+            console.warn(
+              "[WhatsApp] Preserving the current pairing code for about 1 minute before retrying."
+            );
+          }
           updateStatus({
             state: pendingPairingCode ? "pairing_code" : "reconnecting",
             connected: false,
             pairingCode: pendingPairingCode,
             qr: null,
             message: pendingPairingCode
-              ? "Pairing code generated. Enter it in WhatsApp to finish linking."
+              ? "Pairing code generated. Enter it in WhatsApp and wait at least 1 minute before requesting a new code."
               : preferQrLogin
                 ? "Pairing code flow failed repeatedly. Reconnecting with QR fallback..."
                 : "WhatsApp login session disconnected before pairing. Reconnecting...",
             lastError: errorMessage
           });
-          scheduleReconnect();
+          scheduleReconnect(
+            pendingPairingCode ? PAIRING_CODE_HOLD_MS : RECONNECT_DELAY_MS
+          );
           return;
         }
 
