@@ -35,6 +35,4 @@ RUN mkdir -p /app/data/whatsapp-session /tmp
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium \
     WHATSAPP_SESSION_DIR=/app/data/whatsapp-session
 
-VOLUME ["/app/data"]
-
 CMD ["npm","start"]
