@@ -257,6 +257,8 @@ function createWhatsAppBot(groupName) {
   let groupId = null;
   let reconnectTimer = null;
   let waitingForQrScan = false;
+  let startPromise = null;
+  let resolveStart = null;
 
   const events = new EventEmitter();
 
@@ -377,6 +379,11 @@ function createWhatsAppBot(groupName) {
       await resolveGroup();
 
       events.emit("ready");
+
+      if (resolveStart) {
+        resolveStart();
+        resolveStart = null;
+      }
     });
 
     client.on("auth_failure", (message) => {
@@ -465,8 +472,22 @@ function createWhatsAppBot(groupName) {
     }
   }
 
+  function start() {
+    if (startPromise) {
+      return startPromise;
+    }
+
+    startPromise = new Promise((resolve) => {
+      resolveStart = resolve;
+    });
+
+    initialize();
+
+    return startPromise;
+  }
+
   return {
-    start: initialize,
+    start,
     on: (eventName, handler) => events.on(eventName, handler),
     sendToGroup,
     sendMediaToGroup

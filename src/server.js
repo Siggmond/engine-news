@@ -75,31 +75,39 @@ app.get("*", (req, res) => {
 // Start App
 // =====================
 
-function start() {
+function listen() {
+  return new Promise((resolve, reject) => {
+    const server = app.listen(PORT, "0.0.0.0", () => {
+      console.log(`Dashboard running on port ${PORT}`);
+      resolve(server);
+    });
 
+    server.on("error", reject);
+  });
+}
+
+async function main() {
   ensureDataFiles();
 
-  // start dashboard immediately (Railway requirement)
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Dashboard running on port ${PORT}`);
-  });
+  await listen();
 
   const whatsappClient = createWhatsAppBot(GROUP_NAME);
-
   let rssStarted = false;
 
   whatsappClient.on("ready", () => {
-
     console.log("WhatsApp ready");
 
     if (!rssStarted) {
       rssStarted = true;
       startRssEngine(whatsappClient);
     }
-
   });
 
-  whatsappClient.start();
+  await whatsappClient.start();
+
+  console.log("WhatsApp engine running");
 }
 
-start();
+main().catch((error) => {
+  console.error(`[Server] Startup error: ${error.message}`);
+});
