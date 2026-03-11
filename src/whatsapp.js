@@ -2,6 +2,7 @@ const { Client, LocalAuth, MessageMedia } = require("whatsapp-web.js");
 const { EventEmitter } = require("events");
 const axios = require("axios");
 const mime = require("mime-types");
+const fs = require("fs");
 const path = require("path");
 
 function createWhatsAppBot(groupName) {
@@ -12,6 +13,31 @@ function createWhatsAppBot(groupName) {
   let reconnectTimer = null;
 
   const events = new EventEmitter();
+
+  /* Remove chromium lock files after crashes or restarts */
+  function cleanChromiumLocks() {
+
+    const sessionPath = path.join(process.cwd(), "data");
+
+    const lockFiles = [
+      "SingletonLock",
+      "SingletonCookie",
+      "SingletonSocket"
+    ];
+
+    lockFiles.forEach(file => {
+
+      const fullPath = path.join(sessionPath, file);
+
+      if (fs.existsSync(fullPath)) {
+        try {
+          fs.unlinkSync(fullPath);
+          console.log(`[WhatsApp] Removed lock file: ${file}`);
+        } catch {}
+      }
+
+    });
+  }
 
   async function resolveGroup() {
 
@@ -38,9 +64,7 @@ function createWhatsAppBot(groupName) {
     } catch (error) {
 
       console.error(`[WhatsApp] Failed to resolve group: ${error.message}`);
-
       groupId = null;
-
       return null;
     }
   }
@@ -65,6 +89,9 @@ function createWhatsAppBot(groupName) {
   }
 
   function initialize() {
+
+    /* Fix chromium profile lock issue */
+    cleanChromiumLocks();
 
     const executablePath =
       process.env.PUPPETEER_EXECUTABLE_PATH ||
@@ -173,7 +200,6 @@ function createWhatsAppBot(groupName) {
     } catch (error) {
 
       console.error(`[WhatsApp] Failed to send message: ${error.message}`);
-
       return false;
     }
   }
@@ -207,7 +233,6 @@ function createWhatsAppBot(groupName) {
     } catch (error) {
 
       console.error(`[WhatsApp] Media send failed: ${error.message}`);
-
       return false;
     }
   }
