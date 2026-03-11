@@ -6,7 +6,6 @@ const fs = require("fs");
 const path = require("path");
 
 function createWhatsAppBot(groupName) {
-
   let client = null;
   let isReady = false;
   let groupId = null;
@@ -14,17 +13,14 @@ function createWhatsAppBot(groupName) {
 
   const events = new EventEmitter();
 
-  /* Safe recursive chromium lock cleaner */
+  // --- Remove chromium lock files to avoid Railway crash ---
   function cleanChromiumLocks() {
+    const base = path.join(process.cwd(), "data");
 
-    const basePath = path.join(process.cwd(), "data");
-
-    if (!fs.existsSync(basePath)) return;
+    if (!fs.existsSync(base)) return;
 
     function walk(dir) {
-
-      let files;
-
+      let files = [];
       try {
         files = fs.readdirSync(dir);
       } catch {
@@ -32,77 +28,68 @@ function createWhatsAppBot(groupName) {
       }
 
       for (const file of files) {
-
-        const fullPath = path.join(dir, file);
+        const full = path.join(dir, file);
 
         let stat;
-
         try {
-          stat = fs.statSync(fullPath);
+          stat = fs.statSync(full);
         } catch {
           continue;
         }
 
         if (stat.isDirectory()) {
-          walk(fullPath);
+          walk(full);
           continue;
         }
 
         if (
-          file.includes("Singleton") ||
           file.includes("LOCK") ||
-          file.includes("lock")
+          file.includes("lock") ||
+          file.includes("Singleton") ||
+          file.includes("SingletonLock") ||
+          file.includes("SingletonCookie")
         ) {
           try {
-            fs.rmSync(fullPath, { force: true });
-            console.log("[WhatsApp] Removed chromium lock:", fullPath);
+            fs.rmSync(full, { force: true });
+            console.log("[WhatsApp] Removed chromium lock:", full);
           } catch {}
         }
-
       }
     }
 
-    walk(basePath);
+    walk(base);
   }
 
   async function resolveGroup() {
-
     if (!client || !isReady) return null;
 
     try {
-
       const chats = await client.getChats();
 
-      const targetGroup = chats.find(
-        chat => chat.isGroup && chat.name === groupName
+      const group = chats.find(
+        (chat) => chat.isGroup && chat.name === groupName
       );
 
-      if (!targetGroup) {
+      if (!group) {
         console.error(`[WhatsApp] Group not found: ${groupName}`);
         groupId = null;
         return null;
       }
 
-      groupId = targetGroup.id._serialized;
-
+      groupId = group.id._serialized;
       return groupId;
-
     } catch (error) {
-
-      console.error(`[WhatsApp] Failed to resolve group: ${error.message}`);
+      console.error("[WhatsApp] Failed to resolve group:", error.message);
       groupId = null;
       return null;
     }
   }
 
   function scheduleReconnect() {
-
     if (reconnectTimer) return;
 
     reconnectTimer = setTimeout(async () => {
-
       reconnectTimer = null;
-
       console.log("[WhatsApp] Reconnecting...");
 
       try {
@@ -110,18 +97,15 @@ function createWhatsAppBot(groupName) {
       } catch {}
 
       initialize();
-
     }, 5000);
   }
 
   function initialize() {
-
-    /* Fix chromium lock issue */
+    // clean chromium lock files before launch
     cleanChromiumLocks();
 
     const executablePath =
-      process.env.PUPPETEER_EXECUTABLE_PATH ||
-      process.env.CHROME_PATH;
+      process.env.PUPPETEER_EXECUTABLE_PATH || process.env.CHROME_PATH;
 
     const puppeteerConfig = {
       headless: true,
@@ -130,8 +114,9 @@ function createWhatsAppBot(groupName) {
         "--disable-setuid-sandbox",
         "--disable-dev-shm-usage",
         "--disable-gpu",
-        "--disable-extensions"
-      ]
+        "--disable-extensions",
+        "--disable-software-rasterizer",
+      ],
     };
 
     if (executablePath) {
@@ -139,138 +124,106 @@ function createWhatsAppBot(groupName) {
     }
 
     client = new Client({
-
       authStrategy: new LocalAuth({
         clientId: "lebanon-news-engine",
-        dataPath: path.join(process.cwd(), "data")
+        dataPath: path.join(process.cwd(), "data"),
       }),
-
-      puppeteer: puppeteerConfig
-
+      puppeteer: puppeteerConfig,
     });
 
-    client.on("qr", qr => {
-
+    client.on("qr", (qr) => {
       console.log("\n📱 WhatsApp Login Required\n");
 
-      const qrUrl =
+      const link =
         "https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=" +
         encodeURIComponent(qr);
 
       console.log("Open this link and scan with WhatsApp:\n");
-      console.log(qrUrl);
+      console.log(link);
       console.log("");
-
     });
 
     client.on("ready", async () => {
-
       isReady = true;
-
       console.log("✅ WhatsApp connected");
 
       await resolveGroup();
-
       events.emit("ready");
-
     });
 
-    client.on("auth_failure", message => {
-
+    client.on("auth_failure", (msg) => {
       isReady = false;
       groupId = null;
-
-      console.error(`[WhatsApp] Auth failure: ${message}`);
-
+      console.error("[WhatsApp] Auth failure:", msg);
       scheduleReconnect();
-
     });
 
-    client.on("disconnected", reason => {
-
+    client.on("disconnected", (reason) => {
       isReady = false;
       groupId = null;
-
-      console.warn(`[WhatsApp] Disconnected: ${reason}`);
-
+      console.warn("[WhatsApp] Disconnected:", reason);
       scheduleReconnect();
-
     });
 
-    client.initialize().catch(error => {
-
+    client.initialize().catch((err) => {
       isReady = false;
       groupId = null;
-
-      console.error(`[WhatsApp] Initialization failed: ${error.message}`);
-
+      console.error("[WhatsApp] Initialization failed:", err.message);
       scheduleReconnect();
-
     });
   }
 
   async function sendToGroup(message) {
-
     if (!client || !isReady) return false;
 
     if (!groupId) await resolveGroup();
-
     if (!groupId) return false;
 
     try {
-
       await client.sendMessage(groupId, message);
-
       return true;
-
-    } catch (error) {
-
-      console.error(`[WhatsApp] Failed to send message: ${error.message}`);
+    } catch (err) {
+      console.error("[WhatsApp] Send failed:", err.message);
       return false;
     }
   }
 
   async function sendMediaToGroup(url, caption) {
-
     if (!client || !isReady) return false;
 
     if (!groupId) await resolveGroup();
-
     if (!groupId) return false;
 
     try {
-
-      const response = await axios.get(url, {
+      const res = await axios.get(url, {
         responseType: "arraybuffer",
-        timeout: 20000
+        timeout: 20000,
       });
 
       const mimeType = mime.lookup(url) || "image/jpeg";
 
       const media = new MessageMedia(
         mimeType,
-        Buffer.from(response.data).toString("base64")
+        Buffer.from(res.data).toString("base64")
       );
 
       await client.sendMessage(groupId, media, { caption });
 
       return true;
-
-    } catch (error) {
-
-      console.error(`[WhatsApp] Media send failed: ${error.message}`);
+    } catch (err) {
+      console.error("[WhatsApp] Media send failed:", err.message);
       return false;
     }
   }
 
   return {
     start: initialize,
-    on: (eventName, handler) => events.on(eventName, handler),
+    on: (event, fn) => events.on(event, fn),
     sendToGroup,
-    sendMediaToGroup
+    sendMediaToGroup,
   };
 }
 
 module.exports = {
-  createWhatsAppBot
+  createWhatsAppBot,
 };
