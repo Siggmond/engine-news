@@ -3,7 +3,7 @@ const { EventEmitter } = require("events");
 const fs = require("fs");
 const path = require("path");
 const axios = require("axios");
-const QRCode = require("qrcode");
+
 
 function createWhatsAppBot(groupName) {
 
