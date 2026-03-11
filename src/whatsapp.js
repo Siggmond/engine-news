@@ -358,7 +358,7 @@ function createWhatsAppBot(groupName) {
 
         const qrUrl =
           "https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=" +
-          encodeURIComponent(qr);
+          qr;
 
         console.log("\n==============================");
         console.log("WhatsApp login required");
