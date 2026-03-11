@@ -17,6 +17,26 @@ ${title}
 ${summary}`;
 }
 
+/* Detect Arabic text so we don't translate it again */
+function isArabic(text) {
+  return /[\u0600-\u06FF]/.test(text);
+}
+
+/* Remove Telegram placeholder items like [Video] [Photo] */
+function isPlaceholder(title) {
+
+  if (!title) return false;
+
+  const t = title.toLowerCase().trim();
+
+  return (
+    t === "[video]" ||
+    t === "[photo]" ||
+    t === "[gif]" ||
+    t === "[document]"
+  );
+}
+
 function extractMedia(item) {
 
   if (item.enclosure?.url) return item.enclosure.url;
@@ -36,7 +56,7 @@ function isInvalidPost(article) {
 
   const text = `${article.title} ${article.description}`.trim();
 
-  if (text.length < 15) return true;
+  if (text.length < 10) return true;
 
   if (text.startsWith("http")) return true;
 
@@ -52,6 +72,11 @@ async function processArticle(bot, article, mediaUrl) {
     return;
   }
 
+  if (isPlaceholder(article.title)) {
+    console.log("[RSS] Ignored Telegram placeholder");
+    return;
+  }
+
   if (isInvalidPost(article)) {
     console.log("[RSS] Ignored invalid / short post");
     return;
@@ -61,18 +86,27 @@ async function processArticle(bot, article, mediaUrl) {
 
   const cleanTitle = stripHtmlTags(article.title || "خبر عاجل");
 
-  const cleanSummary = summarizeText(
-    article.description || article.contentSnippet || "",
-    3
+  const cleanSummary = stripHtmlTags(
+    article.description || article.contentSnippet || ""
   );
 
-  const arabicTitle = await translateToArabic(cleanTitle);
+  let arabicTitle = cleanTitle;
+  let arabicSummary = cleanSummary;
 
-  const arabicSummary = await translateToArabic(cleanSummary);
+  /* Only translate if the text is NOT Arabic */
+  if (!isArabic(cleanTitle)) {
+    arabicTitle = await translateToArabic(cleanTitle);
+  }
+
+  if (!isArabic(cleanSummary)) {
+    arabicSummary = await translateToArabic(
+      summarizeText(cleanSummary, 3)
+    );
+  }
 
   const message = formatMessage(
     arabicTitle || cleanTitle,
-    arabicSummary || cleanSummary || ""
+    arabicSummary || ""
   );
 
   let sent = false;
@@ -85,7 +119,7 @@ async function processArticle(bot, article, mediaUrl) {
 
   if (sent) {
     addPosted(article.link);
-    console.log(`Article sent to group`);
+    console.log("Article sent to group");
   }
 }
 
