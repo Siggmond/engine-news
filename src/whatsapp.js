@@ -16,6 +16,20 @@ const CHROMIUM_LOCK_FILES = new Set([
   "SingletonSocket",
   "lockfile"
 ]);
+const PERSISTED_PROFILE_PATHS = [
+  path.join("Default", "IndexedDB"),
+  path.join("Default", "Local Storage"),
+  path.join("Default", "Session Storage"),
+  path.join("Default", "Network")
+];
+const EXCLUDED_PROFILE_DIRS = new Set([
+  "Code Cache",
+  "Cache",
+  "GPUCache",
+  "Service Worker",
+  "GrShaderCache",
+  "ShaderCache"
+]);
 
 function isChromiumLockFile(fileName) {
   return (
@@ -49,31 +63,42 @@ async function removeChromiumLockFiles(rootDir) {
   return removed;
 }
 
-async function copySessionDirectory(sourceDir, targetDir) {
+function shouldExcludePersistedPath(relativePath) {
+  if (!relativePath || relativePath === ".") {
+    return false;
+  }
+
+  return relativePath
+    .split(path.sep)
+    .some(
+      (segment) =>
+        EXCLUDED_PROFILE_DIRS.has(segment) || isChromiumLockFile(segment)
+    );
+}
+
+async function copyPersistedSessionData(sourceDir, targetDir) {
   if (!fs.existsSync(sourceDir)) {
     return;
   }
 
-  await fs.promises.mkdir(targetDir, { recursive: true });
+  for (const relativePath of PERSISTED_PROFILE_PATHS) {
+    const sourcePath = path.join(sourceDir, relativePath);
 
-  const entries = await fs.promises.readdir(sourceDir, { withFileTypes: true });
-
-  for (const entry of entries) {
-    if (isChromiumLockFile(entry.name)) {
+    if (!fs.existsSync(sourcePath)) {
       continue;
     }
 
-    await fs.promises.cp(
-      path.join(sourceDir, entry.name),
-      path.join(targetDir, entry.name),
-      {
-        recursive: true,
-        force: true,
-        filter: (sourcePath) => {
-          return !isChromiumLockFile(path.basename(sourcePath));
-        }
+    const targetPath = path.join(targetDir, relativePath);
+
+    await fs.promises.mkdir(path.dirname(targetPath), { recursive: true });
+    await fs.promises.cp(sourcePath, targetPath, {
+      recursive: true,
+      force: true,
+      filter: (currentSourcePath) => {
+        const nestedRelativePath = path.relative(sourceDir, currentSourcePath);
+        return !shouldExcludePersistedPath(nestedRelativePath);
       }
-    );
+    });
   }
 }
 
@@ -109,7 +134,7 @@ class RailwaySessionAuth extends BaseAuthStrategy {
 
     await fs.promises.rm(userDataDir, { recursive: true, force: true });
     await fs.promises.mkdir(userDataDir, { recursive: true });
-    await copySessionDirectory(this.sessionDir, userDataDir);
+    await copyPersistedSessionData(this.sessionDir, userDataDir);
 
     this.runtimeUserDataDir = userDataDir;
 
@@ -176,17 +201,24 @@ class RailwaySessionAuth extends BaseAuthStrategy {
       return;
     }
 
-    const stagingDir = `${this.sessionDir}-staging`;
+    const stagingDir = path.join(
+      path.dirname(this.runtimeUserDataDir),
+      `whatsapp-session-${this.clientId}-staging`
+    );
 
-    await fs.promises.rm(stagingDir, { recursive: true, force: true });
-    await copySessionDirectory(this.runtimeUserDataDir, stagingDir);
-    await removeChromiumLockFiles(stagingDir);
+    try {
+      await fs.promises.rm(stagingDir, { recursive: true, force: true });
+      await copyPersistedSessionData(this.runtimeUserDataDir, stagingDir);
+      await removeChromiumLockFiles(stagingDir);
 
-    await fs.promises.mkdir(this.dataPath, { recursive: true });
-    await fs.promises.rm(this.sessionDir, { recursive: true, force: true });
+      fs.rmSync(this.dataPath, { recursive: true, force: true });
+      await fs.promises.mkdir(this.dataPath, { recursive: true });
 
-    if (fs.existsSync(stagingDir)) {
-      await fs.promises.rename(stagingDir, this.sessionDir);
+      if (fs.existsSync(stagingDir)) {
+        await copyPersistedSessionData(stagingDir, this.sessionDir);
+      }
+    } finally {
+      await fs.promises.rm(stagingDir, { recursive: true, force: true });
     }
   }
 
