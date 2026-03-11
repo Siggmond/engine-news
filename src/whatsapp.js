@@ -4,7 +4,6 @@ const fs = require("fs");
 const path = require("path");
 const axios = require("axios");
 
-
 function createWhatsAppBot(groupName) {
 
   let sock = null;
@@ -14,35 +13,23 @@ function createWhatsAppBot(groupName) {
   const sessionPath = path.join(process.cwd(), "data", "baileys-session");
 
   async function resolveGroup() {
-
     if (!sock) return;
 
     try {
-
       const groups = await sock.groupFetchAllParticipating();
 
       for (const id in groups) {
-
         if (groups[id].subject === groupName) {
-
           groupId = id;
-
           console.log("[WhatsApp] Group resolved:", groupName);
-
           return;
-
         }
-
       }
 
       console.log("[WhatsApp] Group not found:", groupName);
-
     } catch (err) {
-
       console.log("[WhatsApp] Failed resolving group:", err.message);
-
     }
-
   }
 
   async function start() {
@@ -54,36 +41,28 @@ function createWhatsAppBot(groupName) {
     const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
 
     sock = makeWASocket({
-
       auth: state,
-
-      browser: ["Ubuntu", "Chrome", "120.0.0"],
-
-      printQRInTerminal: false
-
+      browser: ["Ubuntu", "Chrome", "120.0.0"]
     });
 
     sock.ev.on("creds.update", saveCreds);
 
-    sock.ev.on("connection.update", async (update) => {
+    // Pairing code login (reliable on servers)
+    if (!sock.authState.creds.registered) {
 
-      const { connection, qr, lastDisconnect } = update;
+      const phoneNumber = process.env.WHATSAPP_NUMBER;
 
-      if (qr) {
+      const code = await sock.requestPairingCode(phoneNumber);
 
-        console.log("\n==============================");
-        console.log("WhatsApp LOGIN REQUIRED");
-        console.log("==============================\n");
+      console.log("\n==============================");
+      console.log("WhatsApp PAIRING CODE");
+      console.log("==============================\n");
+      console.log("Enter this code in WhatsApp → Linked Devices:\n");
+      console.log(code);
+      console.log("");
+    }
 
-        const qrLink =
-          "https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=" +
-          encodeURIComponent(qr);
-
-        console.log("Open this link and scan with WhatsApp:\n");
-        console.log(qrLink);
-        console.log("");
-
-      }
+    sock.ev.on("connection.update", async ({ connection, lastDisconnect }) => {
 
       if (connection === "open") {
 
@@ -92,7 +71,6 @@ function createWhatsAppBot(groupName) {
         await resolveGroup();
 
         events.emit("ready");
-
       }
 
       if (connection === "close") {
@@ -103,13 +81,9 @@ function createWhatsAppBot(groupName) {
         console.log("[WhatsApp] Connection closed");
 
         if (shouldReconnect) {
-
           console.log("[WhatsApp] Reconnecting...");
-
           start();
-
         }
-
       }
 
     });
@@ -167,17 +141,11 @@ function createWhatsAppBot(groupName) {
   }
 
   return {
-
     start,
-
     on: (eventName, handler) => events.on(eventName, handler),
-
     sendToGroup,
-
     sendMediaToGroup
-
   };
-
 }
 
 module.exports = {
