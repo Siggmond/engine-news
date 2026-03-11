@@ -7,6 +7,7 @@ function createWhatsAppBot(groupName) {
   let isReady = false;
   let groupId = null;
   let reconnectTimer = null;
+
   const events = new EventEmitter();
 
   async function resolveGroup() {
@@ -14,6 +15,7 @@ function createWhatsAppBot(groupName) {
 
     try {
       const chats = await client.getChats();
+
       const targetGroup = chats.find(
         (chat) => chat.isGroup && chat.name === groupName
       );
@@ -38,15 +40,14 @@ function createWhatsAppBot(groupName) {
 
     reconnectTimer = setTimeout(async () => {
       reconnectTimer = null;
+
       console.log("[WhatsApp] Reconnecting...");
 
       try {
         if (client) {
           await client.destroy();
         }
-      } catch {
-        // Ignore destroy errors and continue re-initialization.
-      }
+      } catch {}
 
       initialize();
     }, 5000);
@@ -58,7 +59,16 @@ function createWhatsAppBot(groupName) {
 
     const puppeteerConfig = {
       headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-accelerated-2d-canvas",
+        "--no-first-run",
+        "--no-zygote",
+        "--single-process",
+        "--disable-gpu"
+      ]
     };
 
     if (executablePath) {
@@ -66,8 +76,10 @@ function createWhatsAppBot(groupName) {
     }
 
     client = new Client({
-      authStrategy: new LocalAuth({ clientId: "lebanon-news-engine" }),
-      puppeteer: puppeteerConfig,
+      authStrategy: new LocalAuth({
+        clientId: "lebanon-news-engine"
+      }),
+      puppeteer: puppeteerConfig
     });
 
     client.on("qr", (qr) => {
@@ -77,29 +89,38 @@ function createWhatsAppBot(groupName) {
 
     client.on("ready", async () => {
       isReady = true;
+
       console.log("WhatsApp connected");
+
       await resolveGroup();
+
       events.emit("ready");
     });
 
     client.on("auth_failure", (message) => {
       isReady = false;
       groupId = null;
+
       console.error(`[WhatsApp] Auth failure: ${message}`);
+
       scheduleReconnect();
     });
 
     client.on("disconnected", (reason) => {
       isReady = false;
       groupId = null;
+
       console.warn(`[WhatsApp] Disconnected: ${reason}`);
+
       scheduleReconnect();
     });
 
     client.initialize().catch((error) => {
       isReady = false;
       groupId = null;
+
       console.error(`[WhatsApp] Initialization failed: ${error.message}`);
+
       scheduleReconnect();
     });
   }
@@ -131,10 +152,10 @@ function createWhatsAppBot(groupName) {
   return {
     start: initialize,
     on: (eventName, handler) => events.on(eventName, handler),
-    sendToGroup,
+    sendToGroup
   };
 }
 
 module.exports = {
-  createWhatsAppBot,
+  createWhatsAppBot
 };
