@@ -1,12 +1,9 @@
 const { EventEmitter } = require("events");
 const fs = require("fs");
-const path = require("path");
 const axios = require("axios");
 const { importSessionFromEnv } = require("./whatsappSession");
 
-const SESSION_ROOT =
-  process.env.WHATSAPP_SESSION_DIR ||
-  path.join(process.cwd(), "whatsapp-session");
+const SESSION_ROOT = process.env.WHATSAPP_SESSION_DIR || "./data/whatsapp-session";
 const RECONNECT_DELAY_MS = 5000;
 const STREAM_METHOD_NOT_ALLOWED_STATUS = 405;
 const AUTH_MODE_AUTO = "auto";
@@ -17,6 +14,10 @@ const PAIRING_CODE_HOLD_MS = 65000;
 const PRELOGIN_DISCONNECTS_BEFORE_QR_FALLBACK = 3;
 
 let baileysModulePromise = null;
+
+if (!fs.existsSync(SESSION_ROOT)) {
+  fs.mkdirSync(SESSION_ROOT, { recursive: true });
+}
 
 function loadBaileys() {
   if (!baileysModulePromise) {
@@ -486,13 +487,16 @@ function createWhatsAppBot(groupName) {
       }
     });
 
-    activeSocket.ev.on("creds.update", async () => {
+    const persistCreds = async () => {
       try {
         await saveCreds();
       } catch (error) {
         console.error(`[WhatsApp] Failed to save session: ${error.message}`);
       }
+    };
 
+    sock.ev.on("creds.update", persistCreds);
+    sock.ev.on("creds.update", () => {
       if (sock !== activeSocket || !activeSocket.authState.creds.registered) {
         return;
       }
