@@ -427,7 +427,6 @@ function createWhatsAppBot(groupName) {
   async function initialize() {
     const {
       default: makeWASocket,
-      Browsers,
       DisconnectReason,
       fetchLatestWaWebVersion,
       useMultiFileAuthState
@@ -466,7 +465,7 @@ function createWhatsAppBot(groupName) {
 
     const activeSocket = makeWASocket({
       auth: state,
-      browser: Browsers.ubuntu("Chrome"),
+      browser: ["Chrome", "Windows", "10"],
       defaultQueryTimeoutMs: undefined,
       logger: createSilentLogger(),
       markOnlineOnConnect: false,
