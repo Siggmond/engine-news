@@ -332,7 +332,7 @@ function createWhatsAppBot(groupName) {
   }
 
   async function requestPairingCode(activeSocket) {
-    if (!activeSocket || shouldUseQr()) {
+    if (!activeSocket || !usePairing || shouldUseQr()) {
       return;
     }
 
@@ -461,7 +461,7 @@ function createWhatsAppBot(groupName) {
 
     const { state, saveCreds } = await useMultiFileAuthState(SESSION_ROOT);
 
-    if (!state.creds.registered && state.creds.pairingCode) {
+    if (usePairing && !state.creds.registered && state.creds.pairingCode) {
       setPairingCodeStatus(state.creds.pairingCode);
     }
 
@@ -488,14 +488,16 @@ function createWhatsAppBot(groupName) {
         return;
       }
 
-      if (!shouldUseQr()) {
+      if (loginMode !== AUTH_MODE_QR && !shouldUseQr()) {
         return;
       }
 
       try {
         const qrData = await QRCode.toDataURL(qr);
         global.whatsappQR = qrData;
-        console.log("QR LOGIN READY: /qr");
+        console.log(
+          loginMode === AUTH_MODE_QR ? "QR LOGIN READY AT /qr" : "QR LOGIN READY: /qr"
+        );
       } catch (error) {
         console.error(`[WhatsApp] Failed to render QR link: ${error.message}`);
       }
@@ -544,7 +546,7 @@ function createWhatsAppBot(groupName) {
             message: "Scan this QR code in WhatsApp > Linked Devices > Link a device.",
             lastError: null
           });
-        } else if (savedPairingCode) {
+        } else if (usePairing && savedPairingCode) {
           setPairingCodeStatus(savedPairingCode);
         } else if (connection === "connecting" && !status.qr) {
           setWaitingStatus();
@@ -590,6 +592,7 @@ function createWhatsAppBot(groupName) {
       const statusCode = lastDisconnect?.error?.output?.statusCode;
       const errorMessage = lastDisconnect?.error?.message || null;
       const pendingPairingCode =
+        usePairing &&
         !activeSocket.authState.creds.registered &&
         activeSocket.authState.creds.pairingCode
           ? activeSocket.authState.creds.pairingCode
