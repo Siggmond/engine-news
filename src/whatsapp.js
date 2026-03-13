@@ -207,6 +207,24 @@ function createWhatsAppBot(groupName) {
     }
   }
 
+  async function logParticipatingGroups(activeSocket = sock) {
+    if (!activeSocket) {
+      return;
+    }
+
+    try {
+      const groups = await activeSocket.groupFetchAllParticipating();
+
+      console.log("=== WHATSAPP GROUPS ===");
+
+      Object.values(groups || {}).forEach((group) => {
+        console.log(group.subject, "->", group.id);
+      });
+    } catch (error) {
+      console.error(`[WhatsApp] Failed to list groups: ${error.message}`);
+    }
+  }
+
   function clearReconnectTimer() {
     if (!reconnectTimer) {
       return;
@@ -582,6 +600,7 @@ function createWhatsAppBot(groupName) {
 
         console.log("[WhatsApp] Connected");
         global.whatsappQR = null;
+        await logParticipatingGroups(activeSocket);
 
         await resolveGroup(activeSocket);
 
