@@ -1,7 +1,6 @@
 const { EventEmitter } = require("events");
 const fs = require("fs");
 const https = require("https");
-const axios = require("axios");
 const QRCode = require("qrcode");
 const { importSessionFromEnv } = require("./whatsappSession");
 
@@ -755,7 +754,7 @@ function createWhatsAppBot(groupName) {
     }
   }
 
-  async function sendMediaToGroup(url, caption) {
+  async function sendMediaToGroup(_url, message) {
     if (!sock || !isReady) return false;
 
     if (!groupId) await resolveGroup();
@@ -763,19 +762,11 @@ function createWhatsAppBot(groupName) {
     if (!groupId) return false;
 
     try {
-      const response = await axios.get(url, {
-        responseType: "arraybuffer",
-        timeout: 20000
-      });
-
-      await sock.sendMessage(groupId, {
-        image: Buffer.from(response.data),
-        caption
-      });
+      await sock.sendMessage(groupId, { text: message });
 
       return true;
     } catch (error) {
-      console.error(`[WhatsApp] Media send failed: ${error.message}`);
+      console.error(`[WhatsApp] Failed to send message: ${error.message}`);
       return false;
     }
   }
