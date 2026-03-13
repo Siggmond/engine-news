@@ -738,15 +738,22 @@ function createWhatsAppBot(groupName) {
     });
   }
 
-  async function sendToGroup(message) {
+  async function sendTextToGroup(message) {
     if (!sock || !isReady) return false;
 
     if (!groupId) await resolveGroup();
 
     if (!groupId) return false;
 
+    const textMessage = String(message || "").trim();
+
+    if (!textMessage) {
+      console.log("Skipping empty message");
+      return false;
+    }
+
     try {
-      await sock.sendMessage(groupId, { text: message });
+      await sock.sendMessage(groupId, { text: textMessage });
       return true;
     } catch (error) {
       console.error(`[WhatsApp] Failed to send message: ${error.message}`);
@@ -754,21 +761,12 @@ function createWhatsAppBot(groupName) {
     }
   }
 
+  async function sendToGroup(message) {
+    return sendTextToGroup(message);
+  }
+
   async function sendMediaToGroup(_url, message) {
-    if (!sock || !isReady) return false;
-
-    if (!groupId) await resolveGroup();
-
-    if (!groupId) return false;
-
-    try {
-      await sock.sendMessage(groupId, { text: message });
-
-      return true;
-    } catch (error) {
-      console.error(`[WhatsApp] Failed to send message: ${error.message}`);
-      return false;
-    }
+    return sendTextToGroup(message);
   }
 
   function start() {
