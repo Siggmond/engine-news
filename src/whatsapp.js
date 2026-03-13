@@ -8,7 +8,8 @@ const { importSessionFromEnv } = require("./whatsappSession");
 const SESSION_ROOT = process.env.WHATSAPP_SESSION_DIR || "./data/whatsapp-session";
 const agent = new https.Agent({
   keepAlive: true,
-  maxSockets: 10
+  keepAliveMsecs: 10000,
+  maxSockets: 20
 });
 const RECONNECT_DELAY_MS = 5000;
 const STREAM_METHOD_NOT_ALLOWED_STATUS = 405;
@@ -474,9 +475,11 @@ function createWhatsAppBot(groupName) {
 
     const activeSocket = makeWASocket({
       auth: state,
-      browser: ["Chrome", "Windows", "10"],
-      defaultQueryTimeoutMs: undefined,
+      browser: ["Chrome", "Linux", "1.0"],
+      connectTimeoutMs: 60000,
+      defaultQueryTimeoutMs: 0,
       fetchAgent: agent,
+      keepAliveIntervalMs: 10000,
       logger: createSilentLogger(),
       markOnlineOnConnect: false,
       printQRInTerminal: false,
