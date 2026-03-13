@@ -1,220 +1,37 @@
-const Parser = require("rss-parser");
 const cron = require("node-cron");
 
-const { hasPosted, addPosted, getFeeds } = require("./storage");
-const { stripHtmlTags, summarizeText, translateToArabic } = require("./translator");
-
-const parser = new Parser({
-  timeout: 15000
-});
-
-/* Format final WhatsApp message */
-function formatMessage(title, summary) {
-
-  const cleanTitle = title.trim();
-  const cleanSummary = summary.trim();
-
-  if (!cleanSummary) {
-    return `🕊 نور الولاية NEWS
-━━━━━━━━━━━━
-
-${cleanTitle}`;
-  }
-
-  if (cleanSummary === cleanTitle) {
-    return `🕊 نور الولاية NEWS
-━━━━━━━━━━━━
-
-${cleanTitle}`;
-  }
-
-  if (cleanSummary.includes(cleanTitle)) {
-    return `🕊 نور الولاية NEWS
-━━━━━━━━━━━━
-
-${cleanSummary}`;
-  }
-
-  return `🕊 نور الولاية NEWS
-━━━━━━━━━━━━
-
-${cleanTitle}
-
-${cleanSummary}`;
-}
-
-/* Detect Arabic text so we don't translate it again */
-function isArabic(text) {
-  return /[\u0600-\u06FF]/.test(text);
-}
-
-/* Remove Telegram placeholder items like [Video] [Photo] */
-function isPlaceholder(title) {
-
-  if (!title) return false;
-
-  const t = title.toLowerCase().trim();
-
-  return (
-    t === "[video]" ||
-    t === "[photo]" ||
-    t === "[gif]" ||
-    t === "[document]"
-  );
-}
-
-/* Extract media URL if available */
-function extractMedia(item) {
-
-  if (item.enclosure?.url) return item.enclosure.url;
-
-  if (item["media:content"]?.url) return item["media:content"].url;
-
-  if (item["media:thumbnail"]?.url) return item["media:thumbnail"].url;
-
-  if (item.image?.url) return item.image.url;
-
-  return null;
-}
-
-/* Filter bad RSS posts */
-function isInvalidPost(article) {
-
-  if (!article.title && !article.description) return true;
-
-  const text = `${article.title} ${article.description}`.trim();
-
-  if (text.length < 10) return true;
-
-  if (text.startsWith("http")) return true;
-
-  return false;
-}
-
-async function processArticle(bot, article, mediaUrl) {
-
-  if (!article.link) return;
-
-  if (hasPosted(article.link)) {
-    console.log(`Duplicate skipped: ${article.link}`);
-    return;
-  }
-
-  if (isPlaceholder(article.title)) {
-    console.log("[RSS] Ignored Telegram placeholder");
-    return;
-  }
-
-  if (isInvalidPost(article)) {
-    console.log("[RSS] Ignored invalid / short post");
-    return;
-  }
-
-  console.log(`New article found: ${article.title}`);
-
-  const cleanTitle = stripHtmlTags(article.title || "خبر عاجل");
-
-  let cleanSummary = stripHtmlTags(
-    article.description || article.contentSnippet || ""
-  );
-
-  /* Remove duplicated title in summary */
-  if (cleanSummary === cleanTitle) {
-    cleanSummary = "";
-  }
-
-  let arabicTitle = cleanTitle;
-  let arabicSummary = cleanSummary;
-
-  /* Only translate if NOT Arabic */
-  if (!isArabic(cleanTitle)) {
-    arabicTitle = await translateToArabic(cleanTitle);
-  }
-
-  if (cleanSummary && !isArabic(cleanSummary)) {
-    arabicSummary = await translateToArabic(
-      summarizeText(cleanSummary, 1)
-    );
-  }
-
-  const message = formatMessage(
-    arabicTitle || cleanTitle,
-    arabicSummary || ""
-  );
-
-  let sent = false;
-
-  if (mediaUrl) {
-    sent = await bot.sendMediaToGroup(mediaUrl, message);
-  } else {
-    sent = await bot.sendToGroup(message);
-  }
-
-  if (sent) {
-    addPosted(article.link);
-    console.log("Article sent to group");
-  }
-}
+const { addPosted } = require("./storage");
+const { getProcessedNews } = require("./engine/newsPipeline");
 
 async function scanFeeds(bot) {
+  const newsItems = await getProcessedNews();
 
-  const feeds = getFeeds();
-
-  if (feeds.length === 0) {
-    console.log("[RSS] No feeds configured.");
+  if (newsItems.length === 0) {
+    console.log("[NewsPipeline] No new items ready for delivery.");
     return;
   }
 
-  for (const feedUrl of feeds) {
+  for (const item of newsItems) {
+    const sent = await bot.sendToGroup(item.text);
 
-    try {
-
-      const feed = await parser.parseURL(feedUrl);
-
-      const items = Array.isArray(feed.items) ? feed.items : [];
-
-      for (const item of items) {
-
-        const mediaUrl = extractMedia(item);
-
-        const article = {
-          title: item.title || "",
-          description:
-            item.contentSnippet ||
-            item.summary ||
-            item.content ||
-            item.description ||
-            "",
-          link: item.link || item.guid || "",
-          contentSnippet: item.contentSnippet || ""
-        };
-
-        await processArticle(bot, article, mediaUrl);
-
-      }
-
-    } catch (error) {
-
-      console.error(`[RSS] Failed to parse feed ${feedUrl}: ${error.message}`);
-
+    if (sent && item.postedKey) {
+      addPosted(item.postedKey);
+      console.log(`[NewsPipeline] Sent item: ${item.postedKey}`);
     }
   }
 }
 
 function startRssEngine(bot) {
-
-  console.log("[RSS] Scheduler active: runs every 1 minute");
+  console.log("[NewsPipeline] Scheduler active: runs every 1 minute");
 
   cron.schedule("* * * * *", () => {
-
     scanFeeds(bot).catch((error) => {
-      console.error(`[RSS] Scan error: ${error.message}`);
+      console.error(`[NewsPipeline] Scan error: ${error.message}`);
     });
-
   });
 
   scanFeeds(bot).catch((error) => {
-    console.error(`[RSS] Initial scan error: ${error.message}`);
+    console.error(`[NewsPipeline] Initial scan error: ${error.message}`);
   });
 }
 
