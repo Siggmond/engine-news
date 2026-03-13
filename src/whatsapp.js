@@ -50,7 +50,9 @@ function sanitizePhoneNumber(value) {
 }
 
 function getConfiguredAuthMode() {
-  const rawValue = String(process.env.WHATSAPP_AUTH_MODE || AUTH_MODE_AUTO)
+  const rawValue = String(
+    process.env.WA_LOGIN_MODE || process.env.WHATSAPP_AUTH_MODE || AUTH_MODE_PAIRING
+  )
     .trim()
     .toLowerCase();
 
@@ -62,7 +64,7 @@ function getConfiguredAuthMode() {
     return AUTH_MODE_QR;
   }
 
-  return AUTH_MODE_AUTO;
+  return AUTH_MODE_PAIRING;
 }
 
 function parseWaWebVersion(value) {
@@ -134,15 +136,16 @@ function createWhatsAppBot(groupName) {
   let startPromise = null;
   let resolveStart = null;
   let rejectStart = null;
-  const authMode = getConfiguredAuthMode();
+  const loginMode = getConfiguredAuthMode();
+  const usePairing = loginMode === AUTH_MODE_PAIRING;
   const phoneNumber = sanitizePhoneNumber(process.env.WHATSAPP_NUMBER);
-  let preferQrLogin = authMode !== AUTH_MODE_PAIRING;
+  let preferQrLogin = !usePairing;
   let preLoginDisconnectCount = 0;
   let lastLoggedPairingCode = null;
   let status = {
     state: "starting",
     connected: false,
-    authMode,
+    authMode: loginMode,
     phoneNumberConfigured: Boolean(phoneNumber),
     pairingCode: null,
     qr: null,
@@ -272,7 +275,7 @@ function createWhatsAppBot(groupName) {
   }
 
   function shouldUseQr() {
-    if (authMode !== AUTH_MODE_PAIRING) {
+    if (!usePairing) {
       return true;
     }
 
@@ -284,7 +287,7 @@ function createWhatsAppBot(groupName) {
   }
 
   function shouldRequestPairingCode() {
-    return authMode === AUTH_MODE_PAIRING && Boolean(phoneNumber) && !preferQrLogin;
+    return usePairing && Boolean(phoneNumber) && !preferQrLogin;
   }
 
   function setWaitingStatus() {
@@ -335,7 +338,7 @@ function createWhatsAppBot(groupName) {
 
     if (!phoneNumber) {
       const error = new Error(
-        "WHATSAPP_NUMBER must be set when WHATSAPP_AUTH_MODE=pairing."
+        "WHATSAPP_NUMBER must be set when WA_LOGIN_MODE=pairing."
       );
 
       console.error(`[WhatsApp] ${error.message}`);
@@ -386,6 +389,7 @@ function createWhatsAppBot(groupName) {
             return;
           }
 
+          console.log("WHATSAPP PAIRING CODE:", code);
           codeIssued = true;
           setPairingCodeStatus(code);
         } catch (error) {
@@ -476,9 +480,7 @@ function createWhatsAppBot(groupName) {
 
     sock = activeSocket;
 
-    sock.ev.on("connection.update", async (update) => {
-      const { qr, connection } = update;
-
+    sock.ev.on("connection.update", async ({ qr, connection }) => {
       if (!qr) {
         if (connection === "open" || connection === "close") {
           global.whatsappQR = null;
@@ -486,11 +488,14 @@ function createWhatsAppBot(groupName) {
         return;
       }
 
+      if (!shouldUseQr()) {
+        return;
+      }
+
       try {
-        const qrDataUrl = await QRCode.toDataURL(qr);
-        global.whatsappQR = qrDataUrl;
-        console.log("QR LOGIN LINK:");
-        console.log(qrDataUrl);
+        const qrData = await QRCode.toDataURL(qr);
+        global.whatsappQR = qrData;
+        console.log("QR LOGIN READY: /qr");
       } catch (error) {
         console.error(`[WhatsApp] Failed to render QR link: ${error.message}`);
       }
@@ -618,7 +623,7 @@ function createWhatsAppBot(groupName) {
         isPreLoginDisconnect &&
         !pendingPairingCode &&
         !preferQrLogin &&
-        authMode !== AUTH_MODE_PAIRING &&
+        loginMode !== AUTH_MODE_PAIRING &&
         preLoginDisconnectCount >= PRELOGIN_DISCONNECTS_BEFORE_QR_FALLBACK
       ) {
         preferQrLogin = true;
@@ -656,7 +661,7 @@ function createWhatsAppBot(groupName) {
         }
 
         console.warn("[WhatsApp] Session logged out; resetting session and reconnecting.");
-        preferQrLogin = authMode !== AUTH_MODE_PAIRING;
+        preferQrLogin = !usePairing;
         updateStatus({
           state: "reconnecting",
           connected: false,
