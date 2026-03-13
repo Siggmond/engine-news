@@ -182,29 +182,16 @@ function createWhatsAppBot(groupName) {
   }
 
   async function resolveGroup(activeSocket = sock) {
-    if (!activeSocket || !isReady) return null;
+    const configuredGroupId = String(process.env.GROUP_ID || "").trim();
 
-    try {
-      const groups = await activeSocket.groupFetchAllParticipating();
-
-      const targetGroup = Object.entries(groups || {}).find(([, metadata]) => {
-        return metadata?.subject === groupName || metadata?.name === groupName;
-      });
-
-      if (!targetGroup) {
-        console.error(`[WhatsApp] Group not found: ${groupName}`);
-        groupId = null;
-        return null;
-      }
-
-      groupId = targetGroup[0];
-
-      return groupId;
-    } catch (error) {
-      console.error(`[WhatsApp] Failed to resolve group: ${error.message}`);
+    if (!configuredGroupId) {
+      console.error("GROUP_ID not configured");
       groupId = null;
       return null;
     }
+
+    groupId = configuredGroupId;
+    return groupId;
   }
 
   async function logParticipatingGroups(activeSocket = sock) {
