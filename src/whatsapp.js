@@ -1,6 +1,7 @@
 const { EventEmitter } = require("events");
 const fs = require("fs");
 const axios = require("axios");
+const QRCode = require("qrcode");
 const { importSessionFromEnv } = require("./whatsappSession");
 
 const SESSION_ROOT = process.env.WHATSAPP_SESSION_DIR || "./data/whatsapp-session";
@@ -135,9 +136,7 @@ function createWhatsAppBot(groupName) {
   let rejectStart = null;
   const authMode = getConfiguredAuthMode();
   const phoneNumber = sanitizePhoneNumber(process.env.WHATSAPP_NUMBER);
-  let preferQrLogin =
-    authMode === AUTH_MODE_QR ||
-    (!phoneNumber && authMode !== AUTH_MODE_PAIRING);
+  let preferQrLogin = authMode !== AUTH_MODE_PAIRING;
   let preLoginDisconnectCount = 0;
   let lastLoggedPairingCode = null;
   let status = {
@@ -273,11 +272,11 @@ function createWhatsAppBot(groupName) {
   }
 
   function shouldUseQr() {
-    if (authMode === AUTH_MODE_QR) {
+    if (authMode !== AUTH_MODE_PAIRING) {
       return true;
     }
 
-    if (!phoneNumber && authMode !== AUTH_MODE_PAIRING) {
+    if (!phoneNumber) {
       return true;
     }
 
@@ -285,7 +284,7 @@ function createWhatsAppBot(groupName) {
   }
 
   function shouldRequestPairingCode() {
-    return authMode !== AUTH_MODE_QR && Boolean(phoneNumber) && !preferQrLogin;
+    return authMode === AUTH_MODE_PAIRING && Boolean(phoneNumber) && !preferQrLogin;
   }
 
   function setWaitingStatus() {
@@ -478,12 +477,22 @@ function createWhatsAppBot(groupName) {
     sock = activeSocket;
 
     sock.ev.on("connection.update", async (update) => {
-      const { qr } = update;
+      const { qr, connection } = update;
 
-      if (qr) {
-        const qrcode = require("qrcode-terminal");
-        console.log("\nScan this QR with WhatsApp:\n");
-        qrcode.generate(qr, { small: true });
+      if (!qr) {
+        if (connection === "open" || connection === "close") {
+          global.whatsappQR = null;
+        }
+        return;
+      }
+
+      try {
+        const qrDataUrl = await QRCode.toDataURL(qr);
+        global.whatsappQR = qrDataUrl;
+        console.log("QR LOGIN LINK:");
+        console.log(qrDataUrl);
+      } catch (error) {
+        console.error(`[WhatsApp] Failed to render QR link: ${error.message}`);
       }
     });
 
@@ -556,6 +565,7 @@ function createWhatsAppBot(groupName) {
         });
 
         console.log("[WhatsApp] Connected");
+        global.whatsappQR = null;
 
         await resolveGroup(activeSocket);
 
@@ -581,6 +591,7 @@ function createWhatsAppBot(groupName) {
           : null;
       const isPreLoginDisconnect = !activeSocket.authState.creds.registered;
 
+      global.whatsappQR = null;
       if (isPreLoginDisconnect) {
         preLoginDisconnectCount += 1;
       }
@@ -645,9 +656,7 @@ function createWhatsAppBot(groupName) {
         }
 
         console.warn("[WhatsApp] Session logged out; resetting session and reconnecting.");
-        preferQrLogin =
-          authMode === AUTH_MODE_QR ||
-          (!phoneNumber && authMode !== AUTH_MODE_PAIRING);
+        preferQrLogin = authMode !== AUTH_MODE_PAIRING;
         updateStatus({
           state: "reconnecting",
           connected: false,

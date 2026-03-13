@@ -18,6 +18,7 @@ const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 const GROUP_NAME = process.env.GROUP_NAME || "Your WhatsApp Group";
 let whatsappClient = null;
+global.whatsappQR = global.whatsappQR || null;
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -77,6 +78,21 @@ app.get("/api/whatsapp-status", (req, res) => {
       updatedAt: new Date().toISOString()
     }
   );
+});
+
+app.get("/qr", (req, res) => {
+  if (!global.whatsappQR) {
+    return res.send("QR not generated yet");
+  }
+
+  res.type("html").send(`
+    <html>
+      <body style="text-align:center;font-family:sans-serif">
+        <h2>Scan with WhatsApp</h2>
+        <img src="${global.whatsappQR}" />
+      </body>
+    </html>
+  `);
 });
 
 
