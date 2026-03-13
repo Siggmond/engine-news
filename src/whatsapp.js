@@ -1,10 +1,15 @@
 const { EventEmitter } = require("events");
 const fs = require("fs");
+const https = require("https");
 const axios = require("axios");
 const QRCode = require("qrcode");
 const { importSessionFromEnv } = require("./whatsappSession");
 
 const SESSION_ROOT = process.env.WHATSAPP_SESSION_DIR || "./data/whatsapp-session";
+const agent = new https.Agent({
+  keepAlive: true,
+  maxSockets: 10
+});
 const RECONNECT_DELAY_MS = 5000;
 const STREAM_METHOD_NOT_ALLOWED_STATUS = 405;
 const AUTH_MODE_AUTO = "auto";
@@ -471,6 +476,7 @@ function createWhatsAppBot(groupName) {
       auth: state,
       browser: ["Chrome", "Windows", "10"],
       defaultQueryTimeoutMs: undefined,
+      fetchAgent: agent,
       logger: createSilentLogger(),
       markOnlineOnConnect: false,
       printQRInTerminal: false,
